@@ -72,4 +72,3 @@ ros2 topic echo /panda/vlm/status
 - The node keeps running forever and reevaluates the active command using the latest live camera frames.
 - If you want to change the command or status topic names, edit the constants at the top of `panda_vlm_live.py`.
 - If `accelerate` is missing, `device_map="auto"` will fail during model loading.
-- `prova_queen.py` has been restored as the original standalone prototype and is not the main live node.
