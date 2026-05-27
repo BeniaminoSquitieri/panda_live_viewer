@@ -172,7 +172,7 @@ class PandaVLMVerifier(Node):
         self.declare_parameter("viewer_host", "0.0.0.0")
         self.declare_parameter("viewer_port", 8081)
         self.declare_parameter("viewer_fps", 10.0)
-        self.declare_parameter("max_new_tokens", 300)
+        self.declare_parameter("max_new_tokens", 64)
 
         # Read the effective parameter values after ROS overrides.
         self.model_path = self.get_parameter("model_path").value
@@ -373,6 +373,14 @@ class PandaVLMVerifier(Node):
         self.get_logger().info(
             f"Received VLM request for {request['skill_name']} (attempt {request['attempt_id']})"
         )
+        if request.get("allowed_statuses"):
+            self.get_logger().info(
+                f"Allowed statuses: {', '.join(request['allowed_statuses'])}"
+            )
+        if request.get("allowed_next_actions"):
+            self.get_logger().info(
+                f"Allowed next actions: {', '.join(request['allowed_next_actions'])}"
+            )
         task_description = request.get("task") or ""
         if task_description:
             self.get_logger().info(f"Task description: {task_description}")
@@ -618,10 +626,13 @@ class PandaVLMVerifier(Node):
 
             # Run generation without gradients to save memory and time.
             with torch.inference_mode():
+                max_tokens = self.max_new_tokens
+                if not self.include_reasoning:
+                    max_tokens = min(max_tokens, 4)
                 generated_ids = self.model.generate(
                     **inputs,
                     do_sample=False,
-                    max_new_tokens=self.max_new_tokens,
+                    max_new_tokens=max_tokens,
                 )
 
             # Remove the prompt tokens so only newly generated tokens remain.
