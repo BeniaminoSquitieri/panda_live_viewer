@@ -102,9 +102,9 @@ class PandaImageSubscriber(Node):
 
         self.get_logger().info("Subscribed to Panda compressed camera topics")
 
-        # Callback function executed when a new image message is received
+    # Callback function executed when a new image message is received
     def image_callback(self, msg, camera_name):
-                # Convert compressed image data back to an OpenCV frame
+        # Convert compressed image data back to an OpenCV frame
         np_arr = np.frombuffer(msg.data, np.uint8)
         frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
 
@@ -140,7 +140,7 @@ def generate_stream(camera_name):
         with lock:
             frame = latest_frames.get(camera_name)
 
-                if frame is None:
+        if frame is None:
             # If no frame is received yet, display a blank placeholder image
             blank = np.zeros((480, 640, 3), dtype=np.uint8)
             cv2.putText(
@@ -179,11 +179,12 @@ def stream(camera_name):
 
 # Main execution block
 if __name__ == "__main__":
-        import sys
+    import sys
+
     # Use port from command line arguments or default to 8080
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8080
 
-        # Start the ROS 2 node in a background daemon thread
+    # Start the ROS 2 node in a background daemon thread
     t = threading.Thread(target=ros_thread, daemon=True)
     t.start()
 

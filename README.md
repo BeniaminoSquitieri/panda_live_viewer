@@ -13,14 +13,15 @@ This project contains a ROS 2 node that reads the Panda robot camera topics in l
 The node:
 
 1. Subscribes to `/panda/camera/front/image_compressed` and `/panda/camera/wrist/image_compressed`.
-2. Waits for a text command on `/panda/vlm/request`.
+2. Waits for a JSON request on `/lerobot_bt/vlm_request`.
 3. Combines the live camera frames and sends them to Qwen3-VL.
-4. Publishes one of these status values on `/panda/vlm/status`:
+4. Publishes a JSON response on `/lerobot_bt/vlm_result` with a `status` value such as:
 	- `SUCCESS`
-	- `FAILED`
-	- `STILL_RUNNING`
-
-`STILL_RUNNING` means the task is not finished yet, or the current scene does not provide enough evidence to conclude.
+	- `FAILURE`
+	- `RUNNING`
+	- `WAIT_HUMAN`
+	- `MANUAL_INTERVENTION_REQUIRED`
+	- `PENDING`
 
 ## Requirements
 
@@ -55,20 +56,20 @@ Start the node:
 python3 panda_vlm_live.py
 ```
 
-Publish a command string on `/panda/vlm/request`, for example:
+Publish a JSON request on `/lerobot_bt/vlm_request`, for example:
 
 ```bash
-ros2 topic pub /panda/vlm/request std_msgs/msg/String "{data: 'Did the robot place the coffee pod inside the coffee machine?'}"
+ros2 topic pub /lerobot_bt/vlm_request std_msgs/msg/String "{data: '{\"event\":\"vlm_check_requested\",\"skill_name\":\"place_first_toast\",\"attempt_id\":1,\"status\":\"PENDING\",\"message\":\"Awaiting VLM result for skill place_first_toast.\",\"allowed_statuses\":[\"PENDING\",\"RUNNING\",\"WAIT_HUMAN\",\"MANUAL_INTERVENTION_REQUIRED\",\"SUCCESS\",\"FAILURE\"],\"allowed_next_actions\":[\"CONTINUE\",\"RETRY_SKILL\",\"WAIT_HUMAN\",\"REQUEST_MANUAL_INTERVENTION\"]}'}"
 ```
 
-Read the result from `/panda/vlm/status`:
+Read the result from `/lerobot_bt/vlm_result`:
 
 ```bash
-ros2 topic echo /panda/vlm/status
+ros2 topic echo /lerobot_bt/vlm_result
 ```
 
 ## Notes
 
-- The node keeps running forever and reevaluates the active command using the latest live camera frames.
-- If you want to change the command or status topic names, edit the constants at the top of `panda_vlm_live.py`.
+- The node keeps running forever and reevaluates the active request using the latest live camera frames.
+- You can override topic names via ROS parameters `vlm_request_topic` and `vlm_result_topic` (legacy `command_topic` and `status_topic` still work).
 - If `accelerate` is missing, `device_map="auto"` will fail during model loading.
