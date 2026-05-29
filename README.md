@@ -1,12 +1,19 @@
 # Panda VLM Live Verifier
 
-This project contains a ROS 2 node that reads the Panda robot camera topics in live mode, listens for a text command on another topic, and uses a Vision-Language Model to decide whether the task is still running, succeeded, or failed.
+ROS 2 node that reads the Panda robot camera topics in live mode, listens for VLM verification requests, and publishes task status results for the Behavior Tree stack.
 
 ## Files
 
-- `panda_vlm_live.py`: live VLM verifier node
-- `panda_live_viewer.py`: MJPEG browser viewer for the same camera topics
-- `prova_queen.py`: earlier VLM prototype kept for reference
+- `panda_vlm_live.py`: thin entry point that starts the verifier
+- `vlm_live/cli.py`: command-line bootstrap for the ROS2 node
+- `vlm_live/node.py`: main ROS2 node and control loop
+- `vlm_live/model.py`: model loading and VLM inference
+- `vlm_live/camera.py`: camera-frame decoding, composition, and temp file helpers
+- `vlm_live/protocol.py`: request parsing, token normalization, and result payload building
+- `vlm_live/prompt.py`: prompt building and status normalization
+- `vlm_live/view.py`: optional browser MJPEG viewer
+- `vlm_live/const.py`: shared defaults and protocol constants
+- `VLM_SERVER_REQUIREMENTS.md`: protocol notes for the LeRobot BT VLM integration
 
 ## What It Does
 
@@ -16,12 +23,47 @@ The node:
 2. Waits for a JSON request on `/lerobot_bt/vlm_request`.
 3. Combines the live camera frames and sends them to Qwen3-VL.
 4. Publishes a JSON response on `/lerobot_bt/vlm_result` with a `status` value such as:
-	- `SUCCESS`
-	- `FAILURE`
-	- `RUNNING`
-	- `WAIT_HUMAN`
-	- `MANUAL_INTERVENTION_REQUIRED`
-	- `PENDING`
+   - `SUCCESS`
+   - `FAILURE`
+   - `RUNNING`
+   - `WAIT_HUMAN`
+   - `MANUAL_INTERVENTION_REQUIRED`
+   - `PENDING`
+
+An optional MJPEG viewer can be enabled from the same node with the ROS parameter `enable_viewer:=true`.
+
+## Input And Output
+
+The node consumes:
+
+1. Two live compressed camera streams:
+   - `/panda/camera/front/image_compressed`
+   - `/panda/camera/wrist/image_compressed`
+2. A JSON request on `/lerobot_bt/vlm_request` wrapped in `std_msgs/msg/String`.
+
+The request JSON is normalized by `vlm_live/protocol.py` and should include at least:
+
+- `skill_name` as a non-empty string
+- `attempt_id` as an integer-like value
+- `message` as an optional free-text BT message
+- `task` as an optional task description for the VLM prompt
+- `allowed_statuses` as an optional list of accepted status tokens
+
+The node publishes:
+
+- A JSON response on `/lerobot_bt/vlm_result`, also wrapped in `std_msgs/msg/String`
+- A payload with `skill_name`, `attempt_id`, `status`, and `message` when the VLM returns a reason
+
+The returned `status` is one of:
+
+- `SUCCESS`
+- `FAILURE`
+- `RUNNING`
+- `WAIT_HUMAN`
+- `MANUAL_INTERVENTION_REQUIRED`
+- `PENDING`
+
+The `message` field in the result contains only the model reason when the model output includes a non-empty explanation.
 
 ## Requirements
 
@@ -32,6 +74,7 @@ The node:
 - `accelerate`
 - `qwen-vl-utils`
 - `opencv-python`
+- `flask` (only needed when `enable_viewer` is true)
 - ROS 2 Python packages: `rclpy`, `sensor_msgs`, `std_msgs`
 
 ## Install
@@ -56,10 +99,16 @@ Start the node:
 python3 panda_vlm_live.py
 ```
 
+Start the node with the browser viewer enabled:
+
+```bash
+python3 panda_vlm_live.py --ros-args -p enable_viewer:=true
+```
+
 Publish a JSON request on `/lerobot_bt/vlm_request`, for example:
 
 ```bash
-ros2 topic pub /lerobot_bt/vlm_request std_msgs/msg/String "{data: '{\"event\":\"vlm_check_requested\",\"skill_name\":\"place_first_toast\",\"attempt_id\":1,\"status\":\"PENDING\",\"message\":\"Awaiting VLM result for skill place_first_toast.\",\"allowed_statuses\":[\"PENDING\",\"RUNNING\",\"WAIT_HUMAN\",\"MANUAL_INTERVENTION_REQUIRED\",\"SUCCESS\",\"FAILURE\"],\"allowed_next_actions\":[\"CONTINUE\",\"RETRY_SKILL\",\"WAIT_HUMAN\",\"REQUEST_MANUAL_INTERVENTION\"]}'}"
+ros2 topic pub /lerobot_bt/vlm_request std_msgs/msg/String "{data: '{\"skill_name\":\"place_first_toast\",\"attempt_id\":1,\"task\":\"Verify that the first toast has been placed correctly.\",\"message\":\"Awaiting VLM result for skill place_first_toast.\",\"allowed_statuses\":[\"PENDING\",\"RUNNING\",\"WAIT_HUMAN\",\"MANUAL_INTERVENTION_REQUIRED\",\"SUCCESS\",\"FAILURE\"]}'}"
 ```
 
 Read the result from `/lerobot_bt/vlm_result`:
@@ -71,5 +120,5 @@ ros2 topic echo /lerobot_bt/vlm_result
 ## Notes
 
 - The node keeps running forever and reevaluates the active request using the latest live camera frames.
-- You can override topic names via ROS parameters `vlm_request_topic` and `vlm_result_topic` (legacy `command_topic` and `status_topic` still work).
+- You can override topic names via ROS parameters `vlm_request_topic` and `vlm_result_topic`.
 - If `accelerate` is missing, `device_map="auto"` will fail during model loading.
