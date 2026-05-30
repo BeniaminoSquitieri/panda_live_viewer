@@ -26,9 +26,6 @@ The node:
    - `SUCCESS`
    - `FAILURE`
    - `RUNNING`
-   - `WAIT_HUMAN`
-   - `MANUAL_INTERVENTION_REQUIRED`
-   - `PENDING`
 
 An optional MJPEG viewer can be enabled from the same node with the ROS parameter `enable_viewer:=true`.
 
@@ -59,9 +56,6 @@ The returned `status` is one of:
 - `SUCCESS`
 - `FAILURE`
 - `RUNNING`
-- `WAIT_HUMAN`
-- `MANUAL_INTERVENTION_REQUIRED`
-- `PENDING`
 
 The `message` field in the result contains only the model reason when the model output includes a non-empty explanation.
 
@@ -108,7 +102,7 @@ python3 panda_vlm_live.py --ros-args -p enable_viewer:=true
 Publish a JSON request on `/lerobot_bt/vlm_request`, for example:
 
 ```bash
-ros2 topic pub /lerobot_bt/vlm_request std_msgs/msg/String "{data: '{\"skill_name\":\"place_first_toast\",\"attempt_id\":1,\"task\":\"Verify that the first toast has been placed correctly.\",\"message\":\"Awaiting VLM result for skill place_first_toast.\",\"allowed_statuses\":[\"PENDING\",\"RUNNING\",\"WAIT_HUMAN\",\"MANUAL_INTERVENTION_REQUIRED\",\"SUCCESS\",\"FAILURE\"]}'}"
+ros2 topic pub /lerobot_bt/vlm_request std_msgs/msg/String "{data: '{\"skill_name\":\"place_first_toast\",\"attempt_id\":1,\"task\":\"Verify that the first toast has been placed correctly.\",\"message\":\"Awaiting VLM result for skill place_first_toast.\",\"allowed_statuses\":[\"RUNNING\",\"SUCCESS\",\"FAILURE\"]}'}"
 ```
 
 Read the result from `/lerobot_bt/vlm_result`:

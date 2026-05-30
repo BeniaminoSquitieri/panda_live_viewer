@@ -28,10 +28,7 @@ The request message is a JSON object stored in the `data` field of
   "task": "Verify that the first toast has been placed correctly.",
   "message": "Awaiting VLM result for skill 'place_first_toast'.",
   "allowed_statuses": [
-    "PENDING",
     "RUNNING",
-    "WAIT_HUMAN",
-    "MANUAL_INTERVENTION_REQUIRED",
     "SUCCESS",
     "FAILURE"
   ]
@@ -73,10 +70,7 @@ The VLM server publishes a JSON object on `/lerobot_bt/vlm_result`.
 
 | Status | Behavior Tree effect | When to use it |
 |--------|----------------------|----------------|
-| `PENDING` | BT waits | The check has not started or evidence is not available yet |
 | `RUNNING` | BT waits | The VLM is still processing or the scene is inconclusive |
-| `WAIT_HUMAN` | BT waits | A human decision is needed |
-| `MANUAL_INTERVENTION_REQUIRED` | BT waits | Physical operator intervention is needed |
 | `SUCCESS` | BT advances | The requested condition is fully satisfied |
 | `FAILURE` | BT retries/fails the skill | The requested condition is clearly not satisfied |
 
@@ -98,7 +92,7 @@ The VLM server publishes a JSON object on `/lerobot_bt/vlm_result`.
 Publish a request:
 
 ```bash
-ros2 topic pub /lerobot_bt/vlm_request std_msgs/msg/String "{data: '{\"skill_name\":\"place_first_toast\",\"attempt_id\":1,\"task\":\"Verify that the first toast has been placed correctly.\",\"message\":\"Awaiting VLM result for skill place_first_toast.\",\"allowed_statuses\":[\"PENDING\",\"RUNNING\",\"WAIT_HUMAN\",\"MANUAL_INTERVENTION_REQUIRED\",\"SUCCESS\",\"FAILURE\"]}'}"
+ros2 topic pub /lerobot_bt/vlm_request std_msgs/msg/String "{data: '{\"skill_name\":\"place_first_toast\",\"attempt_id\":1,\"task\":\"Verify that the first toast has been placed correctly.\",\"message\":\"Awaiting VLM result for skill place_first_toast.\",\"allowed_statuses\":[\"RUNNING\",\"SUCCESS\",\"FAILURE\"]}'}"
 ```
 
 Read results:
