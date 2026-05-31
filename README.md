@@ -1,118 +1,67 @@
-# Panda VLM Live Verifier
 
-ROS 2 node that reads the Panda robot camera topics in live mode, listens for VLM verification requests, and publishes task status results for the Behavior Tree stack.
+# Panda VLM Live Verifier & Planner (panda_live_viewer)
 
-## Files
+## Architecture & Roles
 
-- `panda_vlm_live.py`: thin entry point that starts the verifier
-- `vlm_live/cli.py`: command-line bootstrap for the ROS2 node
-- `vlm_live/node.py`: main ROS2 node and control loop
-- `vlm_live/model.py`: model loading and VLM inference
-- `vlm_live/camera.py`: camera-frame decoding, composition, and temp file helpers
-- `vlm_live/protocol.py`: request parsing, token normalization, and result payload building
-- `vlm_live/prompt.py`: prompt building and status normalization
-- `vlm_live/view.py`: optional browser MJPEG viewer
-- `vlm_live/const.py`: shared defaults and protocol constants
-- `VLM_SERVER_REQUIREMENTS.md`: protocol notes for the LeRobot BT VLM integration
+**panda_live_viewer** (this repo):
+- Visual-side only: observes the real camera scene via ROS.
+- Can propose a Linear IR JSON plan at the start of an episode.
+- Does NOT generate BehaviorTree.CPP XML.
+- Does NOT validate or compile BTs.
+- Does NOT execute BTs.
+- Does NOT own the registry; it consumes `planner_registry_json` from lerobot.
+- May save debug planner outputs under `generated_plans/` (not for live integration).
 
-## What It Does
+**lerobot** (external):
+- Owns validation, XML/YAML generation, and execution.
+- Sends `task_name` + `planner_registry_json` (and optionally `scene_facts_json`) to panda_live_viewer via ROS service `/lerobot_bt/generate_plan` (future integration).
+- Receives only Linear IR JSON as `plan_json`.
+- Validates and compiles plans to XML/YAML.
 
-The node:
+## Planner Output Path
 
-1. Subscribes to `/panda/camera/front/image_compressed` and `/panda/camera/wrist/image_compressed`.
-2. Waits for a JSON request on `/lerobot_bt/vlm_request`.
-3. Combines the live camera frames and sends them to Qwen3-VL.
-4. Publishes a JSON response on `/lerobot_bt/vlm_result` with a `status` value such as:
-   - `SUCCESS`
-   - `FAILURE`
-   - `RUNNING`
+- Debug outputs (raw model responses, Linear IR JSON) may be saved under `generated_plans/`.
+- Do NOT use shared files for live integration; use the ROS service when available.
+- Do NOT commit generated plan artifacts unless intentionally adding examples.
 
-An optional MJPEG viewer can be enabled from the same node with the ROS parameter `enable_viewer:=true`.
+## Planning Prompt & Parsing Helpers
 
-## Input And Output
+See `bt_planning/` for helpers to build prompts and parse Linear IR JSON plans.
 
-The node consumes:
+## Verifier Role (During Execution)
 
-1. Two live compressed camera streams:
-   - `/panda/camera/front/image_compressed`
-   - `/panda/camera/wrist/image_compressed`
-2. A JSON request on `/lerobot_bt/vlm_request` wrapped in `std_msgs/msg/String`.
+- During BT execution, lerobot asks panda_live_viewer for condition verification only.
+- panda_live_viewer returns `SUCCESS`/`FAILURE`/`RUNNING`/`WAIT_HUMAN` for individual checks.
+- Plan JSON is NOT a status result.
+- STATUS/REASON is NOT a plan.
+- Do NOT reuse `/lerobot_bt/vlm_result` for plans.
 
-The request JSON is normalized by `vlm_live/protocol.py` and should include at least:
+## Live Planning Integration (Future)
 
-- `skill_name` as a non-empty string
-- `attempt_id` as an integer-like value
-- `message` as an optional free-text BT message
-- `task` as an optional task description for the VLM prompt
-- `allowed_statuses` as an optional list of accepted status tokens
+- Live planning should use `/lerobot_bt/generate_plan` once the service is available.
+- Do NOT implement or guess the service definition unless `GenerateTaskPlan.srv` is present.
 
-The node publishes:
+## Tests & Checks
 
-- A JSON response on `/lerobot_bt/vlm_result`, also wrapped in `std_msgs/msg/String`
-- A payload with `skill_name`, `attempt_id`, `status`, and `message` when the VLM returns a reason
+- If tests exist, run: `python -m pytest -svv`
+- If no tests, run: `python -m compileall .`
 
-The returned `status` is one of:
+## Folder Structure
 
-- `SUCCESS`
-- `FAILURE`
-- `RUNNING`
+- `generated_plans/`: Debug planner outputs only
+  - `raw_model_responses/`
+  - `linear_ir/`
+- `bt_planning/`: Prompt and parser helpers
 
-The `message` field in the result contains only the model reason when the model output includes a non-empty explanation.
+## Definition of Done
 
-## Requirements
+- panda_live_viewer returns Linear IR JSON only.
+- lerobot validates and compiles to XML/YAML.
+- No misleading XML/BT ownership claims.
+- Debug artifacts go under `generated_plans/`.
+- No BehaviorTree.CPP XML generation here.
+- Verifier behavior is not broken.
+- Tests or compile checks pass.
 
-- Python 3.8+
-- ROS 2 installed and sourced
-- `torch`
-- `transformers`
-- `accelerate`
-- `qwen-vl-utils`
-- `opencv-python`
-- `flask` (only needed when `enable_viewer` is true)
-- ROS 2 Python packages: `rclpy`, `sensor_msgs`, `std_msgs`
 
-## Install
-
-```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
-
-Then source your ROS 2 environment:
-
-```bash
-source /opt/ros/<distro>/setup.bash
-```
-
-## Run
-
-Start the node:
-
-```bash
-python3 panda_vlm_live.py
-```
-
-Start the node with the browser viewer enabled:
-
-```bash
-python3 panda_vlm_live.py --ros-args -p enable_viewer:=true
-```
-
-Publish a JSON request on `/lerobot_bt/vlm_request`, for example:
-
-```bash
-ros2 topic pub /lerobot_bt/vlm_request std_msgs/msg/String "{data: '{\"skill_name\":\"place_first_toast\",\"attempt_id\":1,\"task\":\"Verify that the first toast has been placed correctly.\",\"message\":\"Awaiting VLM result for skill place_first_toast.\",\"allowed_statuses\":[\"RUNNING\",\"SUCCESS\",\"FAILURE\"]}'}"
-```
-
-Read the result from `/lerobot_bt/vlm_result`:
-
-```bash
-ros2 topic echo /lerobot_bt/vlm_result
-```
-
-## Notes
-
-- The node keeps running forever and reevaluates the active request using the latest live camera frames.
-- You can override topic names via ROS parameters `vlm_request_topic` and `vlm_result_topic`.
-- If `accelerate` is missing, `device_map="auto"` will fail during model loading.
+# (Verifier usage and install/run instructions follow below)

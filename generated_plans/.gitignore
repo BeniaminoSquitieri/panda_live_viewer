@@ -1,0 +1,4 @@
+raw_model_responses/*
+linear_ir/*
+!README.md
+!.gitkeep
