@@ -3,8 +3,6 @@ Manual check for dry-run planner and parser.
 Run: python3 -m bt_planning.manual_check
 """
 import json
-import tempfile
-import os
 from bt_planning.dry_run_plan import make_dummy_plan, extract_names
 from bt_planning.plan_parser import parse_linear_ir_plan, PlanParseError
 

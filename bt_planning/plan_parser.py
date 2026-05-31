@@ -30,6 +30,8 @@ def parse_linear_ir_plan(response: str) -> Dict[str, Any]:
     for i, step in enumerate(plan["steps"]):
         if not isinstance(step, dict):
             raise PlanParseError(f"Step {i} is not an object.")
+        if "type" in step:
+            raise PlanParseError(f"Step {i} uses 'type' instead of 'kind'.")
         if "kind" not in step:
             raise PlanParseError(f"Step {i} missing 'kind'.")
         if "name" not in step:
@@ -38,8 +40,6 @@ def parse_linear_ir_plan(response: str) -> Dict[str, Any]:
             raise PlanParseError(f"Step {i} has invalid 'kind': {step['kind']}")
         if not isinstance(step["name"], str) or not step["name"].strip():
             raise PlanParseError(f"Step {i} has invalid or empty 'name'.")
-        if "type" in step and "kind" not in step:
-            raise PlanParseError(f"Step {i} uses 'type' instead of 'kind'.")
         if "raw_xml" in step or "xml" in step:
             raise PlanParseError(f"Step {i} contains forbidden XML field.")
     return plan
