@@ -9,22 +9,26 @@ Dry-run/mock planner for Linear IR JSON plan generation.
 """
 import argparse
 import json
-import os
-import random
 from pathlib import Path
 
+def extract_names(entries):
+    names = []
+    for entry in entries or []:
+        if isinstance(entry, str):
+            name = entry.strip()
+        elif isinstance(entry, dict):
+            name = str(entry.get("name", "")).strip()
+        else:
+            continue
+        if name:
+            names.append(name)
+    return names
+
 def load_registry(path):
-    with open(path, 'r') as f:
+    with open(path, 'r', encoding='utf-8') as f:
         return json.load(f)
 
 def make_dummy_plan(task_name, registry):
-    robot_skills = registry.get('robot_skills', [])
-    human_steps = registry.get('human_steps', [])
-    vlm_gates = registry.get('vlm_gates', [])
-    steps = []
-    # Add at least one of each type if available
-
-
     robot_skills = extract_names(registry.get('robot_skills', []))
     human_steps = extract_names(registry.get('human_steps', []))
     vlm_gates = extract_names(registry.get('vlm_gates', []))
@@ -66,6 +70,21 @@ def make_dummy_plan(task_name, registry):
         }
     else:
         raise RuntimeError(f"dry-run deterministic plan not implemented for task: {task_name}")
+
+def main():
+    parser = argparse.ArgumentParser(description="Dry-run Linear IR planner (mock, does not call VLM)")
+    parser.add_argument('--task', required=True, help='Task name')
+    parser.add_argument('--planner-registry', required=True, help='Path to planner_registry JSON')
+    parser.add_argument('--out-plan', required=True, help='Output path for Linear IR JSON plan')
+    args = parser.parse_args()
+
+    registry = load_registry(args.planner_registry)
+    plan = make_dummy_plan(args.task, registry)
+
+    out_path = Path(args.out_plan)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(plan, indent=2) + "\n", encoding="utf-8")
+    print(f"Dry-run plan written to {out_path}")
 
 if __name__ == '__main__':
     main()
