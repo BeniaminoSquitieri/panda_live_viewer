@@ -1,0 +1,81 @@
+"""Pure request handling for the GenerateTaskPlan ROS service."""
+
+import json
+from dataclasses import dataclass
+from typing import Callable, Dict, Optional
+
+from bt_planning.dry_run_plan import make_dummy_plan
+from bt_planning.plan_parser import parse_linear_ir_plan
+from bt_planning.prompt_builder import build_planner_prompt
+
+
+PlannerBackend = Callable[[str], str]
+
+
+@dataclass(frozen=True)
+class GeneratePlanResult:
+    success: bool
+    plan_json: str
+    error_message: str
+    prompt: str = ""
+
+
+def _loads_json_object(raw: str, field_name: str, required: bool) -> Dict:
+    text = (raw or "").strip()
+    if not text:
+        if required:
+            raise ValueError(f"{field_name} is required.")
+        return {}
+
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Malformed {field_name}: {exc}") from exc
+
+    if not isinstance(payload, dict):
+        raise ValueError(f"{field_name} must be a JSON object.")
+    return payload
+
+
+def build_generate_plan_response(
+    task_name: str,
+    planner_registry_json: str,
+    scene_facts_json: str = "",
+    *,
+    dry_run: bool,
+    vlm_backend: Optional[PlannerBackend] = None,
+) -> GeneratePlanResult:
+    """Return GenerateTaskPlan response fields without depending on ROS."""
+    prompt = ""
+    try:
+        normalized_task_name = str(task_name or "").strip()
+        if not normalized_task_name:
+            raise ValueError("task_name is required.")
+
+        registry = _loads_json_object(planner_registry_json, "planner_registry_json", required=True)
+        scene_facts = _loads_json_object(scene_facts_json, "scene_facts_json", required=False)
+        prompt = build_planner_prompt(normalized_task_name, registry, scene_facts or None)
+
+        if dry_run:
+            plan = make_dummy_plan(normalized_task_name, registry)
+        else:
+            if vlm_backend is None:
+                raise RuntimeError("VLM planner backend is not configured.")
+            raw_plan = vlm_backend(prompt)
+            plan = parse_linear_ir_plan(raw_plan)
+
+        plan_json = json.dumps(plan, indent=2)
+        parse_linear_ir_plan(plan_json)
+        return GeneratePlanResult(
+            success=True,
+            plan_json=plan_json,
+            error_message="",
+            prompt=prompt,
+        )
+    except Exception as exc:
+        return GeneratePlanResult(
+            success=False,
+            plan_json="",
+            error_message=str(exc),
+            prompt=prompt,
+        )

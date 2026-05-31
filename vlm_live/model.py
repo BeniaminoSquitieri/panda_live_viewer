@@ -22,8 +22,8 @@ def load_model(model_path: str):
     return processor, model, next(model.parameters()).device
 
 
-def run_inference(scene, prompt: str, processor, model, device, tokens: int, reasoning: bool, log_out: bool, logger) -> Tuple[str, str]:
-    """Run the multimodal model on the current scene and return a verdict."""
+def run_text_inference(scene, prompt: str, processor, model, device, tokens: int, log_out: bool, logger) -> str:
+    """Run the multimodal model on the current scene and return raw text."""
     scene_path = save_image(scene)
     try:
         messages = [
@@ -52,13 +52,10 @@ def run_inference(scene, prompt: str, processor, model, device, tokens: int, rea
         inputs = inputs.to(device)
 
         with torch.inference_mode():
-            generation_limit = tokens
-            if not reasoning:
-                generation_limit = min(generation_limit, 4)
             generated_ids = model.generate(
                 **inputs,
                 do_sample=False,
-                max_new_tokens=generation_limit,
+                max_new_tokens=tokens,
             )
 
         generated_ids_trimmed = [
@@ -74,10 +71,30 @@ def run_inference(scene, prompt: str, processor, model, device, tokens: int, rea
         if log_out:
             logger.info(f"VLM output: {output_text}")
 
-        status = parse_status(output_text)
-        reason = extract_reason(output_text)
-        if not output_text:
-            reason = "Empty model output."
-        return status, reason
+        return output_text
     finally:
         cleanup(scene_path)
+
+
+def run_inference(scene, prompt: str, processor, model, device, tokens: int, reasoning: bool, log_out: bool, logger) -> Tuple[str, str]:
+    """Run the multimodal model on the current scene and return a verdict."""
+    generation_limit = tokens
+    if not reasoning:
+        generation_limit = min(generation_limit, 4)
+
+    output_text = run_text_inference(
+        scene=scene,
+        prompt=prompt,
+        processor=processor,
+        model=model,
+        device=device,
+        tokens=generation_limit,
+        log_out=log_out,
+        logger=logger,
+    )
+
+    status = parse_status(output_text)
+    reason = extract_reason(output_text)
+    if not output_text:
+        reason = "Empty model output."
+    return status, reason

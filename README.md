@@ -14,9 +14,28 @@
 
 **lerobot** (external):
 - Owns validation, XML/YAML generation, and execution.
-- Sends `task_name` + `planner_registry_json` (and optionally `scene_facts_json`) to panda_live_viewer via ROS service `/lerobot_bt/generate_plan` (future integration).
+- Sends `task_name` + `planner_registry_json` (and optionally `scene_facts_json`) to panda_live_viewer via ROS service `/lerobot_bt/generate_plan`.
 - Receives only Linear IR JSON as `plan_json`.
 - Validates and compiles plans to XML/YAML.
+- Provides `canonical_task_sequence`, the authoritative BT leaf order.
+
+## ROS Planning Service
+
+`/lerobot_bt/generate_plan` is implemented on the VLM node.
+
+- Service type: `lerobot_bt_interfaces/srv/GenerateTaskPlan`
+- Request fields: `task_name`, `planner_registry_json`, `scene_facts_json`
+- Response fields: `success`, `plan_json`, `error_message`
+- The service returns Linear IR JSON only.
+- panda_live_viewer does not generate XML/YAML, validate definitively, or execute plans.
+- lerobot validates the returned Linear IR and compiles it to XML/YAML.
+- `canonical_task_sequence` comes from lerobot and is treated as the authoritative order.
+- The VLM prompt requires the model to follow `canonical_task_sequence` exactly.
+
+Dry-run service mode is available with the ROS parameter `planner_dry_run:=true`.
+In dry-run mode the service does not call the VLM; it returns `canonical_task_sequence`
+from `planner_registry_json` as `plan_json` after checking each `kind`/`name` pair
+against the allowed `robot_skills`, `human_steps`, and `vlm_gates` vocabularies.
 
 ## Planner Output Path
 
@@ -40,11 +59,7 @@ See `bt_planning/` for helpers to build prompts and parse Linear IR JSON plans.
 - Plan JSON is NOT a status result.
 - STATUS/REASON is NOT a plan.
 - Do NOT reuse `/lerobot_bt/vlm_result` for plans.
-
-## Live Planning Integration (Future)
-
-- Live planning should use `/lerobot_bt/generate_plan` once the service is available.
-- Do NOT implement or guess the service definition unless `GenerateTaskPlan.srv` is present.
+- Planner and verifier are separate flows: planning happens once before BT execution, verification happens during execution.
 
 ## Tests & Checks
 
@@ -54,8 +69,9 @@ See `bt_planning/` for helpers to build prompts and parse Linear IR JSON plans.
 
 ## Dry-run Planner
 
-- The dry-run planner (`bt_planning/dry_run_plan.py`) is deterministic and for debug only.
-- It emits valid Linear IR JSON for known tasks (e.g., `make_sandwich`) if all required names are present in the registry.
+- The dry-run planner (`bt_planning/dry_run_plan.py`) is deterministic and for debug/integration testing.
+- It emits the exact `canonical_task_sequence` from the registry and never invents an order.
+- It fails clearly when `canonical_task_sequence` is missing or references names outside the allowed vocabulary.
 
 ## Folder Structure
 

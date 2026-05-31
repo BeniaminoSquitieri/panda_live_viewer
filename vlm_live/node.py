@@ -2,7 +2,6 @@
 
 import json
 import threading
-import time
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
@@ -12,12 +11,16 @@ from rclpy.node import Node
 from sensor_msgs.msg import CompressedImage
 from std_msgs.msg import String
 
+from bt_planning.service_logic import build_generate_plan_response
+
 from .const import (
     CHECK_PERIOD_SECONDS,
     DEFAULT_ALLOWED_STATUSES,
     FRONT_TOPIC,
+    GENERATE_PLAN_SERVICE,
     MAX_NEW_TOKENS,
     MODEL_PATH,
+    PLANNER_MAX_NEW_TOKENS,
     STATUS_FAILURE,
     STATUS_RUNNING,
     STATUS_SUCCESS,
@@ -29,10 +32,15 @@ from .const import (
     WRIST_TOPIC,
 )
 from .camera import compose, decode_image
-from .model import load_model, run_inference
+from .model import load_model, run_inference, run_text_inference
 from .prompt import build_prompt, fit_status
 from .protocol import build_result_payload, parse_request
 from .view import start_view
+
+try:
+    from lerobot_bt_interfaces.srv import GenerateTaskPlan
+except ImportError:
+    GenerateTaskPlan = None
 
 
 @dataclass(frozen=True)
@@ -44,6 +52,7 @@ class NodeConfig:
     wrist_topic: str
     req_topic: str
     res_topic: str
+    plan_service: str
     check_s: float
     reasoning: bool
     log_out: bool
@@ -52,6 +61,8 @@ class NodeConfig:
     view_port: int
     view_fps: float
     max_tokens: int
+    planner_dry_run: bool
+    planner_max_tokens: int
 
 
 class VlmNode(Node):
@@ -68,6 +79,7 @@ class VlmNode(Node):
         self.wrist_topic = cfg.wrist_topic
         self.req_topic = cfg.req_topic
         self.res_topic = cfg.res_topic
+        self.plan_service = cfg.plan_service
         self.check_s = cfg.check_s
         self.reasoning = cfg.reasoning
         self.log_out = cfg.log_out
@@ -76,6 +88,8 @@ class VlmNode(Node):
         self.view_port = cfg.view_port
         self.view_fps = cfg.view_fps
         self.max_tokens = cfg.max_tokens
+        self.planner_dry_run = cfg.planner_dry_run
+        self.planner_max_tokens = cfg.planner_max_tokens
 
         self._init_state()
         self._init_ros_interfaces()
@@ -86,7 +100,8 @@ class VlmNode(Node):
             self._start_viewer()
 
         self.get_logger().info(
-            f"Ready. Listening on {self.front_topic}, {self.wrist_topic}, and {self.req_topic}"
+            f"Ready. Listening on {self.front_topic}, {self.wrist_topic}, "
+            f"{self.req_topic}, and {self.plan_service}"
         )
 
     def _declare_parameters(self) -> None:
@@ -96,6 +111,7 @@ class VlmNode(Node):
         self.declare_parameter("wrist_topic", WRIST_TOPIC)
         self.declare_parameter("vlm_request_topic", REQUEST_TOPIC)
         self.declare_parameter("vlm_result_topic", RESULT_TOPIC)
+        self.declare_parameter("generate_plan_service", GENERATE_PLAN_SERVICE)
         self.declare_parameter("check_period_seconds", CHECK_PERIOD_SECONDS)
         self.declare_parameter("include_reasoning", True)
         self.declare_parameter("log_model_output", True)
@@ -104,6 +120,8 @@ class VlmNode(Node):
         self.declare_parameter("viewer_port", VIEW_PORT)
         self.declare_parameter("viewer_fps", VIEW_FPS)
         self.declare_parameter("max_new_tokens", MAX_NEW_TOKENS)
+        self.declare_parameter("planner_dry_run", False)
+        self.declare_parameter("planner_max_new_tokens", PLANNER_MAX_NEW_TOKENS)
 
     def _load_config(self) -> NodeConfig:
         """Read and normalize parameter values into an immutable config object."""
@@ -116,6 +134,7 @@ class VlmNode(Node):
             wrist_topic=self.get_parameter("wrist_topic").value,
             req_topic=req_topic,
             res_topic=res_topic,
+            plan_service=self.get_parameter("generate_plan_service").value,
             check_s=float(self.get_parameter("check_period_seconds").value),
             reasoning=bool(self.get_parameter("include_reasoning").value),
             log_out=bool(self.get_parameter("log_model_output").value),
@@ -124,11 +143,14 @@ class VlmNode(Node):
             view_port=int(self.get_parameter("viewer_port").value),
             view_fps=float(self.get_parameter("viewer_fps").value),
             max_tokens=max(1, int(self.get_parameter("max_new_tokens").value)),
+            planner_dry_run=bool(self.get_parameter("planner_dry_run").value),
+            planner_max_tokens=max(1, int(self.get_parameter("planner_max_new_tokens").value)),
         )
 
     def _init_state(self) -> None:
         """Initialize thread synchronization and runtime state variables."""
         self.lock = threading.Lock()
+        self.inference_lock = threading.Lock()
         self.stop = threading.Event()
         self.wake = threading.Event()
         self.frames = {"front": None, "wrist": None}
@@ -156,6 +178,18 @@ class VlmNode(Node):
             10,
         )
         self.status_pub = self.create_publisher(String, self.res_topic, 10)
+        self.generate_plan_srv = None
+        if GenerateTaskPlan is None:
+            self.get_logger().warning(
+                "GenerateTaskPlan service type is unavailable; "
+                f"{self.plan_service} was not created."
+            )
+        else:
+            self.generate_plan_srv = self.create_service(
+                GenerateTaskPlan,
+                self.plan_service,
+                self._on_generate_plan,
+            )
 
     def _load_vlm(self) -> None:
         """Load processor and model weights once during node startup."""
@@ -250,17 +284,62 @@ class VlmNode(Node):
             return STATUS_RUNNING, "Waiting for both camera streams."
 
         prompt = build_prompt(request, self.reasoning)
-        return run_inference(
-            scene=scene,
-            prompt=prompt,
-            processor=self.processor,
-            model=self.model,
-            device=self.device,
-            tokens=self.max_tokens,
-            reasoning=self.reasoning,
-            log_out=self.log_out,
-            logger=self.get_logger(),
+        with self.inference_lock:
+            return run_inference(
+                scene=scene,
+                prompt=prompt,
+                processor=self.processor,
+                model=self.model,
+                device=self.device,
+                tokens=self.max_tokens,
+                reasoning=self.reasoning,
+                log_out=self.log_out,
+                logger=self.get_logger(),
+            )
+
+    def _run_planner_vlm(self, prompt: str) -> str:
+        scene = self._compose_scene()
+        if scene is None:
+            raise RuntimeError("Waiting for camera streams before planning.")
+
+        with self.inference_lock:
+            return run_text_inference(
+                scene=scene,
+                prompt=prompt,
+                processor=self.processor,
+                model=self.model,
+                device=self.device,
+                tokens=self.planner_max_tokens,
+                log_out=self.log_out,
+                logger=self.get_logger(),
+            )
+
+    def _on_generate_plan(self, request, response):
+        result = build_generate_plan_response(
+            task_name=request.task_name,
+            planner_registry_json=request.planner_registry_json,
+            scene_facts_json=request.scene_facts_json,
+            dry_run=self.planner_dry_run,
+            vlm_backend=self._run_planner_vlm,
         )
+
+        if result.prompt:
+            self.get_logger().info(f"Planner prompt:\n{result.prompt}")
+
+        response.success = result.success
+        response.plan_json = result.plan_json
+        response.error_message = result.error_message
+        if result.success:
+            self.get_logger().info(
+                f"Generated Linear IR plan for task {request.task_name!r} "
+                f"(dry_run={self.planner_dry_run})"
+            )
+        else:
+            self.get_logger().warning(
+                f"GenerateTaskPlan failed for task {request.task_name!r}: "
+                f"{result.error_message}"
+            )
+        return response
 
     def _evaluation_loop(self) -> None:
         while rclpy.ok() and not self.stop.is_set():
