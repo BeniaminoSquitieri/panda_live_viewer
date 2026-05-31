@@ -24,7 +24,12 @@
 - Do NOT use shared files for live integration; use the ROS service when available.
 - Do NOT commit generated plan artifacts unless intentionally adding examples.
 
-## Planning Prompt & Parsing Helpers
+
+## Linear IR Step Format
+
+- Each step in a Linear IR plan must have exactly two fields: `kind` and `name`.
+- `kind` is one of: `robot_skill`, `human_step`, `vlm_gate`.
+- `type` is not valid for Linear IR steps.
 
 See `bt_planning/` for helpers to build prompts and parse Linear IR JSON plans.
 
@@ -45,6 +50,12 @@ See `bt_planning/` for helpers to build prompts and parse Linear IR JSON plans.
 
 - If tests exist, run: `python -m pytest -svv`
 - If no tests, run: `python -m compileall .`
+
+
+## Dry-run Planner
+
+- The dry-run planner (`bt_planning/dry_run_plan.py`) is deterministic and for debug only.
+- It emits valid Linear IR JSON for known tasks (e.g., `make_sandwich`) if all required names are present in the registry.
 
 ## Folder Structure
 
