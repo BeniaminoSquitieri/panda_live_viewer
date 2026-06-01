@@ -2,6 +2,7 @@
 
 import json
 import threading
+import time
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
@@ -34,6 +35,7 @@ from .const import (
     WRIST_TOPIC,
 )
 from .camera import compose, decode_image
+from .experiment_log import append_verifier_event, build_verifier_event
 from .model import load_model, run_inference, run_text_inference
 from .prompt import build_prompt, fit_status
 from .protocol import build_result_payload, coerce_result_for_request, parse_request
@@ -67,6 +69,7 @@ class NodeConfig:
     planner_max_tokens: int
     lazy_load_model: bool
     require_generate_plan_service: bool
+    verifier_experiment_log_path: str
 
 
 class VlmNode(Node):
@@ -96,9 +99,11 @@ class VlmNode(Node):
         self.planner_max_tokens = cfg.planner_max_tokens
         self.lazy_load_model = cfg.lazy_load_model
         self.require_generate_plan_service = cfg.require_generate_plan_service
+        self.verifier_experiment_log_path = cfg.verifier_experiment_log_path
 
         self._init_state()
         self._init_ros_interfaces()
+        # Dry-run planning relies on this guard to avoid loading Qwen/GPU at startup.
         if not self.lazy_load_model:
             self._ensure_vlm_loaded()
         self._start_worker()
@@ -129,8 +134,13 @@ class VlmNode(Node):
         self.declare_parameter("max_new_tokens", MAX_NEW_TOKENS)
         self.declare_parameter("planner_dry_run", False)
         self.declare_parameter("planner_max_new_tokens", PLANNER_MAX_NEW_TOKENS)
+        # Robot-day dry-run should keep this true; eager loading is only for live VLM warm-up.
         self.declare_parameter("lazy_load_model", True)
+        # Fail fast when lerobot's GenerateTaskPlan interface was not sourced.
         self.declare_parameter("require_generate_plan_service", True)
+        # Optional append-only JSONL log of verifier events (provenance only).
+        # Empty string disables logging and never changes published payloads.
+        self.declare_parameter("verifier_experiment_log_path", "")
 
     def _load_config(self) -> NodeConfig:
         """Read and normalize parameter values into an immutable config object."""
@@ -158,6 +168,9 @@ class VlmNode(Node):
             require_generate_plan_service=bool(
                 self.get_parameter("require_generate_plan_service").value
             ),
+            verifier_experiment_log_path=str(
+                self.get_parameter("verifier_experiment_log_path").value
+            ),
         )
 
     def _init_state(self) -> None:
@@ -181,7 +194,7 @@ class VlmNode(Node):
             message = (
                 "GenerateTaskPlan service type is unavailable; "
                 f"{self.plan_service} was not created. Fix your ROS environment with: "
-                "source /opt/ros/$ROS_DISTRO/setup.bash && source install/setup.bash"
+                "source /opt/ros/$ROS_DISTRO/setup.bash && source ~/lerobot/install/setup.bash"
             )
             if self.require_generate_plan_service:
                 self.get_logger().error(message)
@@ -307,6 +320,47 @@ class VlmNode(Node):
     def _set_result(self, request: dict, status: str, reason: str) -> None:
         self._publish_result(request, status, reason)
 
+    def _log_verifier_event(
+        self,
+        *,
+        request: dict,
+        raw_status: str,
+        published_status: str,
+        reason: str,
+        was_wait_human_coerced: bool,
+        duration_s: float,
+        error_message: Optional[str],
+    ) -> None:
+        """Append one verifier event for offline analysis (provenance only).
+
+        Logging never changes the published result payload and never saves
+        images; it only records whether a frame was available.
+        """
+        log_path = self.verifier_experiment_log_path
+        if not log_path:
+            return
+        front, wrist = self._get_frames()
+        try:
+            event = build_verifier_event(
+                skill_name=request.get("skill_name", ""),
+                attempt_id=request.get("attempt_id"),
+                allowed_statuses=request.get("allowed_statuses", DEFAULT_ALLOWED_STATUSES),
+                raw_status=raw_status,
+                published_status=published_status,
+                reason=reason,
+                was_wait_human_coerced=was_wait_human_coerced,
+                front_frame_available=front is not None,
+                wrist_frame_available=wrist is not None,
+                duration_s=duration_s,
+                model_path=self.model_path,
+                dry_run_planner=self.planner_dry_run,
+                error_message=error_message,
+            )
+            append_verifier_event(log_path, event)
+        except Exception:
+            # Logging must never break the verification loop.
+            self.get_logger().exception("Failed to write verifier experiment event")
+
     def _start_viewer(self) -> None:
         start_view(
             get_frames=self._get_frames,
@@ -361,6 +415,7 @@ class VlmNode(Node):
             )
 
     def _on_generate_plan(self, request, response):
+        """Handle the planner service; dry_run must not invoke the VLM backend."""
         result = build_generate_plan_response(
             task_name=request.task_name,
             planner_registry_json=request.planner_registry_json,
@@ -396,10 +451,14 @@ class VlmNode(Node):
                 continue
 
             try:
+                inference_start = time.monotonic()
+                error_message = None
                 status, reason = self._run_vlm(request)
             except Exception as exc:
                 self.get_logger().exception("VLM inference failed")
+                error_message = str(exc)
                 status, reason = STATUS_RUNNING, f"Inference error: {exc}"
+            inference_duration_s = time.monotonic() - inference_start
 
             _, current_request_id = self._get_active_request()
             if current_request_id != request_id:
@@ -407,9 +466,19 @@ class VlmNode(Node):
 
             raw_status = status
             status, reason = coerce_result_for_request(request, status, reason)
-            if not (raw_status == STATUS_WAIT_HUMAN and status == STATUS_RUNNING):
+            was_wait_human_coerced = raw_status == STATUS_WAIT_HUMAN and status == STATUS_RUNNING
+            if not was_wait_human_coerced:
                 status = fit_status(status, request.get("allowed_statuses", DEFAULT_ALLOWED_STATUSES))
             self._set_result(request, status, reason)
+            self._log_verifier_event(
+                request=request,
+                raw_status=raw_status,
+                published_status=status,
+                reason=reason,
+                was_wait_human_coerced=was_wait_human_coerced,
+                duration_s=inference_duration_s,
+                error_message=error_message,
+            )
 
             if status in (STATUS_SUCCESS, STATUS_FAILURE, STATUS_WAIT_HUMAN):
                 with self.lock:

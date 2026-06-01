@@ -1,4 +1,4 @@
-"""Scene facts scaffolding for future VLM scene extraction."""
+"""Scene facts scaffold; not used yet to vary planner step order."""
 
 from typing import Any, Dict, Mapping, Optional
 
@@ -15,7 +15,7 @@ def build_scene_facts_stub(
     wrist_available: bool,
     timestamps: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Return the stable scene facts envelope without deriving facts yet."""
+    """Return a stable envelope for future scene extraction."""
     timestamps = timestamps or {}
     return {
         "schema_version": 1,

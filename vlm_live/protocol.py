@@ -96,7 +96,7 @@ def build_result_payload(request: Dict[str, Any], status: str, reason: str) -> O
 
 
 def coerce_result_for_request(request: Dict[str, Any], status: str, reason: str) -> tuple[str, str]:
-    """Apply caller status limits before publishing a VLM result."""
+    """Map WAIT_HUMAN to RUNNING with a prefixed reason unless explicitly allowed."""
     allowed_statuses = request.get("allowed_statuses", DEFAULT_ALLOWED_STATUSES)
     allowed_statuses = clean_statuses(allowed_statuses)
     if status == STATUS_WAIT_HUMAN and STATUS_WAIT_HUMAN not in allowed_statuses:

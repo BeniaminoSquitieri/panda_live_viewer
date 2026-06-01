@@ -1,8 +1,8 @@
 """
-Lightweight parser for Linear IR JSON plans.
+Preliminary parser for Linear IR JSON plans.
 - Rejects XML-like or prose responses.
 - Checks for required fields and rejects unsupported step fields.
-- Does NOT replace lerobot strict validation.
+- Does NOT replace lerobot strict validation, registry checks, or BT generation.
 """
 
 import json
@@ -10,6 +10,7 @@ import re
 from typing import Any, Dict, Iterable
 
 ALLOWED_STEP_KINDS = frozenset(("robot_skill", "human_step", "vlm_gate"))
+# Linear IR steps intentionally stay tiny; lerobot owns all deeper validation.
 ALLOWED_STEP_FIELDS = frozenset(("kind", "name", "object", "objects"))
 FORBIDDEN_FIELDS = frozenset(
     (

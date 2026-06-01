@@ -92,6 +92,12 @@ the same parent directory).
 - `canonical_task_sequence` comes from lerobot and is treated as the authoritative order.
 - The VLM prompt requires the model to follow `canonical_task_sequence` exactly.
 
+Planner baselines (paper measurement):
+
+- The safe service uses the constrained Linear IR prompt only.
+- Baseline prompts can be generated offline with `python3 -m bt_planning.write_baseline_prompts`.
+- The direct XML prompt is an unsafe offline baseline, not an execution path.
+
 Dry-run service mode is available with the ROS parameter `planner_dry_run:=true`.
 In dry-run mode the service does not call the VLM; it returns `canonical_task_sequence`
 from `planner_registry_json` as `plan_json` after checking each `kind`/`name` pair
@@ -104,7 +110,8 @@ The ROS parameter `require_generate_plan_service:=true` fails startup if
 environment with:
 
 ```bash
-source /opt/ros/$ROS_DISTRO/setup.bash && source install/setup.bash
+source /opt/ros/$ROS_DISTRO/setup.bash
+source ~/lerobot/install/setup.bash
 ```
 
 Set `require_generate_plan_service:=false` only when intentionally running the
@@ -135,6 +142,17 @@ See `bt_planning/` for helpers to build prompts and parse Linear IR JSON plans.
 - STATUS/REASON is NOT a plan.
 - Do NOT reuse `/lerobot_bt/vlm_result` for plans.
 - Planner and verifier are separate flows: planning happens once before BT execution, verification happens during execution.
+
+### Verifier experiment logging (optional)
+
+- Set the ROS parameter `verifier_experiment_log_path` to a JSONL file path to
+  record one verifier event per completed inference attempt (skill name, attempt
+  id, raw VLM status, published status, the `WAIT_HUMAN`→`RUNNING` coercion flag,
+  reason, frame availability, and duration).
+- This logging is provenance only: it does **not** change the
+  `/lerobot_bt/vlm_result` topic payload, does not alter status decisions, and
+  never saves camera images (only boolean frame-availability flags).
+- Leave the parameter empty (the default) to disable logging entirely.
 
 ## Tests & Checks
 

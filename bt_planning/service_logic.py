@@ -55,6 +55,7 @@ def _sequence_signature(steps: Iterable[Dict], source: str) -> List[Tuple[str, s
 
 
 def _check_preliminary_plan_constraints(plan: Dict, task_name: str, registry: Dict) -> None:
+    """Catch obvious service-boundary mistakes before lerobot validates fully."""
     if plan["task_name"] != task_name:
         raise ValueError(
             f"Plan task_name {plan['task_name']!r} does not match request task_name {task_name!r}."
@@ -83,7 +84,7 @@ def build_generate_plan_response(
     dry_run: bool,
     vlm_backend: Optional[PlannerBackend] = None,
 ) -> GeneratePlanResult:
-    """Return GenerateTaskPlan response fields without depending on ROS."""
+    """Return GenerateTaskPlan fields; lerobot remains the definitive validator."""
     prompt = ""
     try:
         normalized_task_name = str(task_name or "").strip()
