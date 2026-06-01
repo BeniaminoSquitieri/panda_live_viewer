@@ -7,6 +7,7 @@ from typing import Optional, Tuple
 
 import numpy as np
 import rclpy
+from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.node import Node
 from sensor_msgs.msg import CompressedImage
 from std_msgs.msg import String
@@ -24,6 +25,7 @@ from .const import (
     STATUS_FAILURE,
     STATUS_RUNNING,
     STATUS_SUCCESS,
+    STATUS_WAIT_HUMAN,
     VIEW_FPS,
     VIEW_HOST,
     VIEW_PORT,
@@ -63,6 +65,8 @@ class NodeConfig:
     max_tokens: int
     planner_dry_run: bool
     planner_max_tokens: int
+    lazy_load_model: bool
+    require_generate_plan_service: bool
 
 
 class VlmNode(Node):
@@ -90,10 +94,13 @@ class VlmNode(Node):
         self.max_tokens = cfg.max_tokens
         self.planner_dry_run = cfg.planner_dry_run
         self.planner_max_tokens = cfg.planner_max_tokens
+        self.lazy_load_model = cfg.lazy_load_model
+        self.require_generate_plan_service = cfg.require_generate_plan_service
 
         self._init_state()
         self._init_ros_interfaces()
-        self._load_vlm()
+        if not self.lazy_load_model:
+            self._ensure_vlm_loaded()
         self._start_worker()
 
         if self.show_view:
@@ -101,7 +108,7 @@ class VlmNode(Node):
 
         self.get_logger().info(
             f"Ready. Listening on {self.front_topic}, {self.wrist_topic}, "
-            f"{self.req_topic}, and {self.plan_service}"
+            f"{self.req_topic}, and {self._plan_service_status()}"
         )
 
     def _declare_parameters(self) -> None:
@@ -122,6 +129,8 @@ class VlmNode(Node):
         self.declare_parameter("max_new_tokens", MAX_NEW_TOKENS)
         self.declare_parameter("planner_dry_run", False)
         self.declare_parameter("planner_max_new_tokens", PLANNER_MAX_NEW_TOKENS)
+        self.declare_parameter("lazy_load_model", True)
+        self.declare_parameter("require_generate_plan_service", True)
 
     def _load_config(self) -> NodeConfig:
         """Read and normalize parameter values into an immutable config object."""
@@ -145,56 +154,91 @@ class VlmNode(Node):
             max_tokens=max(1, int(self.get_parameter("max_new_tokens").value)),
             planner_dry_run=bool(self.get_parameter("planner_dry_run").value),
             planner_max_tokens=max(1, int(self.get_parameter("planner_max_new_tokens").value)),
+            lazy_load_model=bool(self.get_parameter("lazy_load_model").value),
+            require_generate_plan_service=bool(
+                self.get_parameter("require_generate_plan_service").value
+            ),
         )
 
     def _init_state(self) -> None:
         """Initialize thread synchronization and runtime state variables."""
         self.lock = threading.Lock()
-        self.inference_lock = threading.Lock()
+        self.inference_lock = threading.RLock()
+        self.callback_group = ReentrantCallbackGroup()
         self.stop = threading.Event()
         self.wake = threading.Event()
         self.frames = {"front": None, "wrist": None}
         self.req = None
         self.req_id = 0
+        self.processor = None
+        self.model = None
+        self.device = None
 
     def _init_ros_interfaces(self) -> None:
         """Create ROS subscriptions and publishers."""
+        self.generate_plan_srv = None
+        if GenerateTaskPlan is None:
+            message = (
+                "GenerateTaskPlan service type is unavailable; "
+                f"{self.plan_service} was not created. Fix your ROS environment with: "
+                "source /opt/ros/$ROS_DISTRO/setup.bash && source install/setup.bash"
+            )
+            if self.require_generate_plan_service:
+                self.get_logger().error(message)
+                raise RuntimeError(message)
+            self.get_logger().warning(message)
+
         self.front_sub = self.create_subscription(
             CompressedImage,
             self.front_topic,
             lambda msg: self._on_image(msg, "front"),
             10,
+            callback_group=self.callback_group,
         )
         self.wrist_sub = self.create_subscription(
             CompressedImage,
             self.wrist_topic,
             lambda msg: self._on_image(msg, "wrist"),
             10,
+            callback_group=self.callback_group,
         )
         self.request_sub = self.create_subscription(
             String,
             self.req_topic,
             self._on_req,
             10,
+            callback_group=self.callback_group,
         )
         self.status_pub = self.create_publisher(String, self.res_topic, 10)
-        self.generate_plan_srv = None
-        if GenerateTaskPlan is None:
-            self.get_logger().warning(
-                "GenerateTaskPlan service type is unavailable; "
-                f"{self.plan_service} was not created."
-            )
-        else:
+        if GenerateTaskPlan is not None:
             self.generate_plan_srv = self.create_service(
                 GenerateTaskPlan,
                 self.plan_service,
                 self._on_generate_plan,
+                callback_group=self.callback_group,
             )
 
+    def _plan_service_status(self) -> str:
+        if self.generate_plan_srv is None:
+            return "GenerateTaskPlan service disabled"
+        return self.plan_service
+
     def _load_vlm(self) -> None:
-        """Load processor and model weights once during node startup."""
+        """Load processor and model weights."""
         self.get_logger().info(f"Loading VLM from {self.model_path}")
         self.processor, self.model, self.device = load_model(self.model_path)
+
+    def _vlm_loaded(self) -> bool:
+        return self.processor is not None and self.model is not None and self.device is not None
+
+    def _ensure_vlm_loaded(self) -> None:
+        """Load the VLM on first use, guarded by the inference lock."""
+        if self._vlm_loaded():
+            return
+
+        with self.inference_lock:
+            if not self._vlm_loaded():
+                self._load_vlm()
 
     def _start_worker(self) -> None:
         """Start background evaluation loop."""
@@ -285,6 +329,7 @@ class VlmNode(Node):
 
         prompt = build_prompt(request, self.reasoning)
         with self.inference_lock:
+            self._ensure_vlm_loaded()
             return run_inference(
                 scene=scene,
                 prompt=prompt,
@@ -303,6 +348,7 @@ class VlmNode(Node):
             raise RuntimeError("Waiting for camera streams before planning.")
 
         with self.inference_lock:
+            self._ensure_vlm_loaded()
             return run_text_inference(
                 scene=scene,
                 prompt=prompt,
@@ -362,7 +408,7 @@ class VlmNode(Node):
             status = fit_status(status, request.get("allowed_statuses", DEFAULT_ALLOWED_STATUSES))
             self._set_result(request, status, reason)
 
-            if status in (STATUS_SUCCESS, STATUS_FAILURE):
+            if status in (STATUS_SUCCESS, STATUS_FAILURE, STATUS_WAIT_HUMAN):
                 with self.lock:
                     if self.req_id == request_id:
                         self.req = None

@@ -2,7 +2,7 @@
 
 import json
 from dataclasses import dataclass
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 from bt_planning.dry_run_plan import make_dummy_plan
 from bt_planning.plan_parser import parse_linear_ir_plan
@@ -37,6 +37,44 @@ def _loads_json_object(raw: str, field_name: str, required: bool) -> Dict:
     return payload
 
 
+def _step_signature(step: Dict, index: int, source: str) -> Tuple[str, str]:
+    if not isinstance(step, dict):
+        raise ValueError(f"{source} step {index} must be an object.")
+
+    kind = step.get("kind")
+    name = step.get("name")
+    if not isinstance(kind, str) or not kind.strip():
+        raise ValueError(f"{source} step {index} missing valid kind.")
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError(f"{source} step {index} missing valid name.")
+    return kind, name
+
+
+def _sequence_signature(steps: Iterable[Dict], source: str) -> List[Tuple[str, str]]:
+    return [_step_signature(step, index, source) for index, step in enumerate(steps)]
+
+
+def _check_preliminary_plan_constraints(plan: Dict, task_name: str, registry: Dict) -> None:
+    if plan["task_name"] != task_name:
+        raise ValueError(
+            f"Plan task_name {plan['task_name']!r} does not match request task_name {task_name!r}."
+        )
+
+    canonical_task_sequence = registry.get("canonical_task_sequence")
+    if canonical_task_sequence is None:
+        return
+    if not isinstance(canonical_task_sequence, list):
+        raise ValueError("planner_registry_json canonical_task_sequence must be a list.")
+
+    plan_sequence = _sequence_signature(plan["steps"], "plan")
+    canonical_sequence = _sequence_signature(canonical_task_sequence, "canonical_task_sequence")
+    if plan_sequence != canonical_sequence:
+        raise ValueError(
+            "Plan steps do not match planner_registry_json canonical_task_sequence exactly: "
+            f"plan={plan_sequence!r}, canonical={canonical_sequence!r}."
+        )
+
+
 def build_generate_plan_response(
     task_name: str,
     planner_registry_json: str,
@@ -66,6 +104,7 @@ def build_generate_plan_response(
 
         plan_json = json.dumps(plan, indent=2)
         parse_linear_ir_plan(plan_json)
+        _check_preliminary_plan_constraints(plan, normalized_task_name, registry)
         return GeneratePlanResult(
             success=True,
             plan_json=plan_json,

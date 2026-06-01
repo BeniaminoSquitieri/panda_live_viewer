@@ -30,7 +30,8 @@ The request message is a JSON object stored in the `data` field of
   "allowed_statuses": [
     "RUNNING",
     "SUCCESS",
-    "FAILURE"
+    "FAILURE",
+    "WAIT_HUMAN"
   ]
 }
 ```
@@ -73,6 +74,7 @@ The VLM server publishes a JSON object on `/lerobot_bt/vlm_result`.
 | `RUNNING` | BT waits | The VLM is still processing or the scene is inconclusive |
 | `SUCCESS` | BT advances | The requested condition is fully satisfied |
 | `FAILURE` | BT retries/fails the skill | The requested condition is clearly not satisfied |
+| `WAIT_HUMAN` | BT routes to human handling | Explicit human intervention, action, or decision is required |
 
 ## Runtime Behavior
 
@@ -85,14 +87,14 @@ The VLM server publishes a JSON object on `/lerobot_bt/vlm_result`.
 5. If the VLM output contains `REASON=...`, only the reason text is published in
    `message`.
 6. Non-final statuses are reevaluated after `check_period_seconds`.
-7. `SUCCESS` and `FAILURE` clear the active request.
+7. `SUCCESS`, `FAILURE`, and `WAIT_HUMAN` clear the active request.
 
 ## Example Commands
 
 Publish a request:
 
 ```bash
-ros2 topic pub /lerobot_bt/vlm_request std_msgs/msg/String "{data: '{\"skill_name\":\"place_first_toast\",\"attempt_id\":1,\"task\":\"Verify that the first toast has been placed correctly.\",\"message\":\"Awaiting VLM result for skill place_first_toast.\",\"allowed_statuses\":[\"RUNNING\",\"SUCCESS\",\"FAILURE\"]}'}"
+ros2 topic pub /lerobot_bt/vlm_request std_msgs/msg/String "{data: '{\"skill_name\":\"place_first_toast\",\"attempt_id\":1,\"task\":\"Verify that the first toast has been placed correctly.\",\"message\":\"Awaiting VLM result for skill place_first_toast.\",\"allowed_statuses\":[\"RUNNING\",\"SUCCESS\",\"FAILURE\",\"WAIT_HUMAN\"]}'}"
 ```
 
 Read results:

@@ -36,6 +36,19 @@ Dry-run service mode is available with the ROS parameter `planner_dry_run:=true`
 In dry-run mode the service does not call the VLM; it returns `canonical_task_sequence`
 from `planner_registry_json` as `plan_json` after checking each `kind`/`name` pair
 against the allowed `robot_skills`, `human_steps`, and `vlm_gates` vocabularies.
+With the default `lazy_load_model:=true`, this dry-run service can answer
+`/lerobot_bt/generate_plan` without loading Qwen or touching the GPU.
+
+The ROS parameter `require_generate_plan_service:=true` fails startup if
+`lerobot_bt_interfaces/srv/GenerateTaskPlan` is unavailable. Fix the ROS
+environment with:
+
+```bash
+source /opt/ros/$ROS_DISTRO/setup.bash && source install/setup.bash
+```
+
+Set `require_generate_plan_service:=false` only when intentionally running the
+verifier without the planning service.
 
 ## Planner Output Path
 
@@ -56,6 +69,7 @@ See `bt_planning/` for helpers to build prompts and parse Linear IR JSON plans.
 
 - During BT execution, lerobot asks panda_live_viewer for condition verification only.
 - panda_live_viewer returns `SUCCESS`/`FAILURE`/`RUNNING`/`WAIT_HUMAN` for individual checks.
+- `WAIT_HUMAN` means the scene requires explicit human intervention, action, or decision.
 - Plan JSON is NOT a status result.
 - STATUS/REASON is NOT a plan.
 - Do NOT reuse `/lerobot_bt/vlm_result` for plans.

@@ -1,9 +1,10 @@
 """Protocol parsing and payload helpers for VLM request/result ROS messages."""
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
-from std_msgs.msg import String
+if TYPE_CHECKING:
+    from std_msgs.msg import String
 
 from .const import DEFAULT_ALLOWED_STATUSES
 
@@ -30,7 +31,7 @@ def clean_statuses(value: Any) -> List[str]:
     return _normalize_statuses(value)
 
 
-def parse_request(msg: String, logger) -> Optional[Dict[str, Any]]:
+def parse_request(msg: "String", logger) -> Optional[Dict[str, Any]]:
     """Validate and normalize the incoming JSON request message."""
     raw = msg.data.strip()
     if not raw:

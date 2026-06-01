@@ -7,7 +7,10 @@ from .const import (
     STATUS_FAILURE,
     STATUS_RUNNING,
     STATUS_SUCCESS,
+    STATUS_WAIT_HUMAN,
 )
+
+STATUS_PATTERN = "|".join((STATUS_RUNNING, STATUS_SUCCESS, STATUS_FAILURE, STATUS_WAIT_HUMAN))
 
 def build_prompt(request: Dict[str, Any], reasoning: bool) -> str:
     """Build the textual instruction for the VLM."""
@@ -26,19 +29,21 @@ def build_prompt(request: Dict[str, Any], reasoning: bool) -> str:
         return (
             common_header
             + "\nReturn two fields only:\n"
-            + "STATUS=<RUNNING|SUCCESS|FAILURE>\n"
+            + "STATUS=<RUNNING|SUCCESS|FAILURE|WAIT_HUMAN>\n"
             + "REASON=<short explanation; may span multiple lines>\n"
-            + "Choose RUNNING when the condition is not yet satisfied or evidence is insufficient.\n"
-            + "Choose FAILURE when the condition is clearly not satisfied in this attempt.\n"
-            + "Choose SUCCESS only when the condition is fully satisfied."
+            + "Choose WAIT_HUMAN when explicit human intervention, a human action, or a human decision is required.\n"
+            + "Choose SUCCESS only when the condition is fully satisfied.\n"
+            + "Choose RUNNING when evidence is insufficient or the condition is not yet satisfied.\n"
+            + "Choose FAILURE when the condition clearly failed and retrying the action is appropriate."
         )
 
     return (
         common_header
-        + "\nReturn exactly one token: RUNNING, SUCCESS, or FAILURE.\n"
-        + "Choose RUNNING when the condition is not yet satisfied or evidence is insufficient.\n"
-        + "Choose FAILURE when the condition is clearly not satisfied in this attempt.\n"
-        + "Choose SUCCESS only when the condition is fully satisfied."
+        + "\nReturn exactly one token: RUNNING, SUCCESS, FAILURE, or WAIT_HUMAN.\n"
+        + "Choose WAIT_HUMAN when explicit human intervention, a human action, or a human decision is required.\n"
+        + "Choose SUCCESS only when the condition is fully satisfied.\n"
+        + "Choose RUNNING when evidence is insufficient or the condition is not yet satisfied.\n"
+        + "Choose FAILURE when the condition clearly failed and retrying the action is appropriate."
     )
 
 
@@ -52,9 +57,8 @@ def extract_reason(text: str) -> str:
     if match:
         return match.group(1).strip()
 
-    status_pattern = r"RUNNING|SUCCESS|FAILURE"
     without_status = re.sub(
-        rf"^\s*STATUS\s*[:=]\s*(?:{status_pattern})\s*",
+        rf"^\s*STATUS\s*[:=]\s*(?:{STATUS_PATTERN})\s*",
         "",
         stripped,
         flags=re.IGNORECASE,
@@ -62,7 +66,10 @@ def extract_reason(text: str) -> str:
     if without_status:
         return without_status
 
-    if re.fullmatch(status_pattern, stripped, flags=re.IGNORECASE):
+    if re.fullmatch(rf"\s*STATUS\s*[:=]\s*(?:{STATUS_PATTERN})\s*", stripped, flags=re.IGNORECASE):
+        return ""
+
+    if re.fullmatch(STATUS_PATTERN, stripped, flags=re.IGNORECASE):
         return ""
 
     return stripped
@@ -72,11 +79,13 @@ def parse_status(text: str) -> str:
     """Normalize the raw model output into a supported status value."""
     upper = text.upper()
     match = re.search(
-        r"STATUS\s*[:=]\s*(RUNNING|SUCCESS|FAILURE)",
+        rf"STATUS\s*[:=]\s*({STATUS_PATTERN})",
         upper,
     )
     if match:
         return match.group(1)
+    if STATUS_WAIT_HUMAN in upper or "WAIT HUMAN" in upper:
+        return STATUS_WAIT_HUMAN
     if STATUS_SUCCESS in upper:
         return STATUS_SUCCESS
     if STATUS_FAILURE in upper or "FAILED" in upper:
@@ -96,4 +105,8 @@ def fit_status(status: str, allowed_statuses: List[str]) -> str:
         return STATUS_FAILURE
     if STATUS_SUCCESS in allowed_statuses:
         return STATUS_SUCCESS
+    if STATUS_WAIT_HUMAN in allowed_statuses:
+        return STATUS_WAIT_HUMAN
+    if allowed_statuses:
+        return allowed_statuses[0]
     return STATUS_RUNNING
