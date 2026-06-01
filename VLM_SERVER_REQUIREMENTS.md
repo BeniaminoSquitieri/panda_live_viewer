@@ -30,8 +30,7 @@ The request message is a JSON object stored in the `data` field of
   "allowed_statuses": [
     "RUNNING",
     "SUCCESS",
-    "FAILURE",
-    "WAIT_HUMAN"
+    "FAILURE"
   ]
 }
 ```
@@ -45,7 +44,10 @@ The request message is a JSON object stored in the `data` field of
 | `allowed_statuses` | `list[string]` | No | Status values accepted by the caller; invalid values are ignored |
 
 Only `skill_name` is required. Missing or invalid optional fields are normalized
-by `vlm_live/protocol.py`.
+by `vlm_live/protocol.py`. The current `lerobot` runtime publishes
+`RUNNING`/`SUCCESS`/`FAILURE` only; `WAIT_HUMAN` is an opt-in extension and is
+valid only when the incoming request explicitly includes it in
+`allowed_statuses`.
 
 ## Response Format
 
@@ -74,7 +76,13 @@ The VLM server publishes a JSON object on `/lerobot_bt/vlm_result`.
 | `RUNNING` | BT waits | The VLM is still processing or the scene is inconclusive |
 | `SUCCESS` | BT advances | The requested condition is fully satisfied |
 | `FAILURE` | BT retries/fails the skill | The requested condition is clearly not satisfied |
-| `WAIT_HUMAN` | BT routes to human handling | Explicit human intervention, action, or decision is required |
+| `WAIT_HUMAN` | Published only if the caller allows it | Explicit human intervention, action, or decision is required |
+
+`lerobot` currently rejects `WAIT_HUMAN` in the Python verifier store and the
+C++ `GetSkillVerification` polling node handles only `RUNNING`, `SUCCESS`, and
+`FAILURE`. When the VLM proposes `WAIT_HUMAN` for a request whose
+`allowed_statuses` does not include it, `panda_live_viewer` publishes
+`RUNNING` instead and prefixes the explanation with `WAIT_HUMAN: `.
 
 ## Runtime Behavior
 
@@ -87,14 +95,15 @@ The VLM server publishes a JSON object on `/lerobot_bt/vlm_result`.
 5. If the VLM output contains `REASON=...`, only the reason text is published in
    `message`.
 6. Non-final statuses are reevaluated after `check_period_seconds`.
-7. `SUCCESS`, `FAILURE`, and `WAIT_HUMAN` clear the active request.
+7. `SUCCESS`, `FAILURE`, and allowed `WAIT_HUMAN` clear the active request.
+   A mapped `WAIT_HUMAN` remains `RUNNING` and keeps the request active.
 
 ## Example Commands
 
 Publish a request:
 
 ```bash
-ros2 topic pub /lerobot_bt/vlm_request std_msgs/msg/String "{data: '{\"skill_name\":\"place_first_toast\",\"attempt_id\":1,\"task\":\"Verify that the first toast has been placed correctly.\",\"message\":\"Awaiting VLM result for skill place_first_toast.\",\"allowed_statuses\":[\"RUNNING\",\"SUCCESS\",\"FAILURE\",\"WAIT_HUMAN\"]}'}"
+ros2 topic pub /lerobot_bt/vlm_request std_msgs/msg/String "{data: '{\"skill_name\":\"place_first_toast\",\"attempt_id\":1,\"task\":\"Verify that the first toast has been placed correctly.\",\"message\":\"Awaiting VLM result for skill place_first_toast.\",\"allowed_statuses\":[\"RUNNING\",\"SUCCESS\",\"FAILURE\"]}'}"
 ```
 
 Read results:

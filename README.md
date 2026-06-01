@@ -59,7 +59,7 @@ verifier without the planning service.
 
 ## Linear IR Step Format
 
-- Each step in a Linear IR plan must have exactly two fields: `kind` and `name`.
+- Each step in a Linear IR plan may contain only `kind`, `name`, `object`, and `objects`.
 - `kind` is one of: `robot_skill`, `human_step`, `vlm_gate`.
 - `type` is not valid for Linear IR steps.
 
@@ -68,8 +68,9 @@ See `bt_planning/` for helpers to build prompts and parse Linear IR JSON plans.
 ## Verifier Role (During Execution)
 
 - During BT execution, lerobot asks panda_live_viewer for condition verification only.
-- panda_live_viewer returns `SUCCESS`/`FAILURE`/`RUNNING`/`WAIT_HUMAN` for individual checks.
-- `WAIT_HUMAN` means the scene requires explicit human intervention, action, or decision.
+- panda_live_viewer returns only statuses allowed by each request.
+- Current lerobot requests allow `SUCCESS`/`FAILURE`/`RUNNING`; they do not support `WAIT_HUMAN` end-to-end.
+- If the VLM proposes `WAIT_HUMAN` without request support, panda_live_viewer publishes `RUNNING` and prefixes the message with `WAIT_HUMAN: `.
 - Plan JSON is NOT a status result.
 - STATUS/REASON is NOT a plan.
 - Do NOT reuse `/lerobot_bt/vlm_result` for plans.

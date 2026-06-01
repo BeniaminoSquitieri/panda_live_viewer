@@ -6,7 +6,12 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 if TYPE_CHECKING:
     from std_msgs.msg import String
 
-from .const import DEFAULT_ALLOWED_STATUSES
+from .const import (
+    DEFAULT_ALLOWED_STATUSES,
+    STATUS_RUNNING,
+    STATUS_WAIT_HUMAN,
+    SUPPORTED_STATUSES,
+)
 
 
 def _normalize_statuses(value: Any) -> List[str]:
@@ -14,7 +19,7 @@ def _normalize_statuses(value: Any) -> List[str]:
     if not isinstance(value, list):
         return DEFAULT_ALLOWED_STATUSES.copy()
 
-    allowed_set = set(DEFAULT_ALLOWED_STATUSES)
+    allowed_set = set(SUPPORTED_STATUSES)
     cleaned: List[str] = []
     for item in value:
         token = str(item).strip().upper()
@@ -78,6 +83,7 @@ def build_result_payload(request: Dict[str, Any], status: str, reason: str) -> O
     skill_name = request.get("skill_name", "").strip()
     if not skill_name:
         return None
+    status, reason = coerce_result_for_request(request, status, reason)
 
     payload = {
         "skill_name": skill_name,
@@ -87,3 +93,19 @@ def build_result_payload(request: Dict[str, Any], status: str, reason: str) -> O
     if reason:
         payload["message"] = reason
     return payload
+
+
+def coerce_result_for_request(request: Dict[str, Any], status: str, reason: str) -> tuple[str, str]:
+    """Apply caller status limits before publishing a VLM result."""
+    allowed_statuses = request.get("allowed_statuses", DEFAULT_ALLOWED_STATUSES)
+    allowed_statuses = clean_statuses(allowed_statuses)
+    if status == STATUS_WAIT_HUMAN and STATUS_WAIT_HUMAN not in allowed_statuses:
+        return STATUS_RUNNING, _wait_human_reason(reason)
+    return status, reason
+
+
+def _wait_human_reason(reason: str) -> str:
+    text = str(reason or "").strip()
+    if text:
+        return f"WAIT_HUMAN: {text}"
+    return "WAIT_HUMAN: human intervention requested"

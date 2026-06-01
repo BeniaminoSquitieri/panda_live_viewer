@@ -4,10 +4,12 @@ import re
 from typing import Any, Dict, List
 
 from .const import (
+    DEFAULT_ALLOWED_STATUSES,
     STATUS_FAILURE,
     STATUS_RUNNING,
     STATUS_SUCCESS,
     STATUS_WAIT_HUMAN,
+    SUPPORTED_STATUSES,
 )
 
 STATUS_PATTERN = "|".join((STATUS_RUNNING, STATUS_SUCCESS, STATUS_FAILURE, STATUS_WAIT_HUMAN))
@@ -16,6 +18,14 @@ def build_prompt(request: Dict[str, Any], reasoning: bool) -> str:
     """Build the textual instruction for the VLM."""
     message = request.get("message") or "No additional context."
     task_text = request.get("task") or ""
+    allowed_statuses = _allowed_statuses_for_prompt(request)
+    status_spec = "|".join(allowed_statuses)
+    status_text = ", ".join(allowed_statuses)
+    wait_human_instruction = ""
+    if STATUS_WAIT_HUMAN in allowed_statuses:
+        wait_human_instruction = (
+            "Choose WAIT_HUMAN when explicit human intervention, a human action, or a human decision is required.\n"
+        )
     task_line = f"Task description: {task_text}\n" if task_text else ""
     common_header = (
         "You are a robotic task verifier. Inspect the live camera scene and decide whether the requested condition is satisfied.\n"
@@ -29,9 +39,9 @@ def build_prompt(request: Dict[str, Any], reasoning: bool) -> str:
         return (
             common_header
             + "\nReturn two fields only:\n"
-            + "STATUS=<RUNNING|SUCCESS|FAILURE|WAIT_HUMAN>\n"
+            + f"STATUS=<{status_spec}>\n"
             + "REASON=<short explanation; may span multiple lines>\n"
-            + "Choose WAIT_HUMAN when explicit human intervention, a human action, or a human decision is required.\n"
+            + wait_human_instruction
             + "Choose SUCCESS only when the condition is fully satisfied.\n"
             + "Choose RUNNING when evidence is insufficient or the condition is not yet satisfied.\n"
             + "Choose FAILURE when the condition clearly failed and retrying the action is appropriate."
@@ -39,8 +49,8 @@ def build_prompt(request: Dict[str, Any], reasoning: bool) -> str:
 
     return (
         common_header
-        + "\nReturn exactly one token: RUNNING, SUCCESS, FAILURE, or WAIT_HUMAN.\n"
-        + "Choose WAIT_HUMAN when explicit human intervention, a human action, or a human decision is required.\n"
+        + f"\nReturn exactly one token: {status_text}.\n"
+        + wait_human_instruction
         + "Choose SUCCESS only when the condition is fully satisfied.\n"
         + "Choose RUNNING when evidence is insufficient or the condition is not yet satisfied.\n"
         + "Choose FAILURE when the condition clearly failed and retrying the action is appropriate."
@@ -110,3 +120,12 @@ def fit_status(status: str, allowed_statuses: List[str]) -> str:
     if allowed_statuses:
         return allowed_statuses[0]
     return STATUS_RUNNING
+
+
+def _allowed_statuses_for_prompt(request: Dict[str, Any]) -> List[str]:
+    raw_statuses = request.get("allowed_statuses")
+    if not isinstance(raw_statuses, list):
+        return DEFAULT_ALLOWED_STATUSES.copy()
+    normalized = {str(status).strip().upper() for status in raw_statuses}
+    allowed = [status for status in SUPPORTED_STATUSES if status in normalized]
+    return allowed or DEFAULT_ALLOWED_STATUSES.copy()

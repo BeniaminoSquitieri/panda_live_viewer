@@ -65,6 +65,23 @@ class GeneratePlanServiceLogicTests(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertIn("canonical_task_sequence", result.error_message)
 
+    def test_dry_run_does_not_call_vlm_backend(self):
+        def fail_if_called(_prompt):
+            raise AssertionError("dry_run must not call vlm_backend")
+
+        result = build_generate_plan_response(
+            task_name="make_sandwich",
+            planner_registry_json=json.dumps(registry()),
+            dry_run=True,
+            vlm_backend=fail_if_called,
+        )
+
+        self.assertTrue(result.success, result.error_message)
+        self.assertEqual(
+            json.loads(result.plan_json)["steps"],
+            registry()["canonical_task_sequence"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

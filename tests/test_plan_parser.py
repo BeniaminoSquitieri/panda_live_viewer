@@ -61,6 +61,36 @@ class LinearIrParserTests(unittest.TestCase):
                 with self.assertRaises(PlanParseError):
                     parse_linear_ir_plan(json.dumps(plan))
 
+    def test_rejects_confidence_step_field(self):
+        plan = valid_plan()
+        plan["steps"][0]["confidence"] = 0.92
+
+        with self.assertRaisesRegex(PlanParseError, "confidence"):
+            parse_linear_ir_plan(json.dumps(plan))
+
+    def test_rejects_reason_step_field(self):
+        plan = valid_plan()
+        plan["steps"][0]["reason"] = "Looks ready."
+
+        with self.assertRaisesRegex(PlanParseError, "reason"):
+            parse_linear_ir_plan(json.dumps(plan))
+
+    def test_accepts_valid_object_step_field(self):
+        plan = valid_plan()
+        plan["steps"][1]["object"] = "toast"
+
+        parsed = parse_linear_ir_plan(json.dumps(plan))
+
+        self.assertEqual(parsed["steps"][1]["object"], "toast")
+
+    def test_accepts_valid_objects_step_field(self):
+        plan = valid_plan()
+        plan["steps"][1]["objects"] = ["toast", "plate"]
+
+        parsed = parse_linear_ir_plan(json.dumps(plan))
+
+        self.assertEqual(parsed["steps"][1]["objects"], ["toast", "plate"])
+
     def test_rejects_wrong_kind(self):
         plan = valid_plan()
         plan["steps"][0]["kind"] = "condition"

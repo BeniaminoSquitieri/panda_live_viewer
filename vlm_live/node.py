@@ -36,7 +36,7 @@ from .const import (
 from .camera import compose, decode_image
 from .model import load_model, run_inference, run_text_inference
 from .prompt import build_prompt, fit_status
-from .protocol import build_result_payload, parse_request
+from .protocol import build_result_payload, coerce_result_for_request, parse_request
 from .view import start_view
 
 try:
@@ -405,7 +405,10 @@ class VlmNode(Node):
             if current_request_id != request_id:
                 continue
 
-            status = fit_status(status, request.get("allowed_statuses", DEFAULT_ALLOWED_STATUSES))
+            raw_status = status
+            status, reason = coerce_result_for_request(request, status, reason)
+            if not (raw_status == STATUS_WAIT_HUMAN and status == STATUS_RUNNING):
+                status = fit_status(status, request.get("allowed_statuses", DEFAULT_ALLOWED_STATUSES))
             self._set_result(request, status, reason)
 
             if status in (STATUS_SUCCESS, STATUS_FAILURE, STATUS_WAIT_HUMAN):

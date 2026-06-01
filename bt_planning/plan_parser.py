@@ -1,7 +1,7 @@
 """
 Lightweight parser for Linear IR JSON plans.
 - Rejects XML-like or prose responses.
-- Checks for required fields: task_name, steps.
+- Checks for required fields and rejects unsupported step fields.
 - Does NOT replace lerobot strict validation.
 """
 
@@ -10,6 +10,7 @@ import re
 from typing import Any, Dict, Iterable
 
 ALLOWED_STEP_KINDS = frozenset(("robot_skill", "human_step", "vlm_gate"))
+ALLOWED_STEP_FIELDS = frozenset(("kind", "name", "object", "objects"))
 FORBIDDEN_FIELDS = frozenset(
     (
         "raw_xml",
@@ -103,6 +104,13 @@ def parse_linear_ir_plan(response: str) -> Dict[str, Any]:
             raise PlanParseError(f"Step {i} is not an object.")
         if "type" in step:
             raise PlanParseError(f"Step {i} uses 'type' instead of 'kind'.")
+        extra_fields = sorted(set(step) - ALLOWED_STEP_FIELDS)
+        if extra_fields:
+            allowed = ", ".join(sorted(ALLOWED_STEP_FIELDS))
+            raise PlanParseError(
+                f"Step {i} contains unsupported field {extra_fields[0]!r}; "
+                f"allowed fields are: {allowed}."
+            )
         if "kind" not in step:
             raise PlanParseError(f"Step {i} missing 'kind'.")
         if "name" not in step:
@@ -111,5 +119,13 @@ def parse_linear_ir_plan(response: str) -> Dict[str, Any]:
             raise PlanParseError(f"Step {i} has invalid 'kind': {step['kind']}")
         if not isinstance(step["name"], str) or not step["name"].strip():
             raise PlanParseError(f"Step {i} has invalid or empty 'name'.")
+        if "object" in step and (not isinstance(step["object"], str) or not step["object"].strip()):
+            raise PlanParseError(f"Step {i} has invalid or empty 'object'.")
+        if "objects" in step:
+            objects = step["objects"]
+            if not isinstance(objects, list) or not objects:
+                raise PlanParseError(f"Step {i} has invalid or empty 'objects'.")
+            if not all(isinstance(obj, str) and obj.strip() for obj in objects):
+                raise PlanParseError(f"Step {i} has invalid entry in 'objects'.")
 
     return plan
