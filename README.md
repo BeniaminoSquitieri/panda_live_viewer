@@ -19,6 +19,66 @@
 - Validates and compiles plans to XML/YAML.
 - Provides `canonical_task_sequence`, the authoritative BT leaf order.
 
+## Runtime BT planner/verifier service
+
+This repo owns the visual side: camera scene, VLM planner service, and VLM
+verification during BT execution. It does not generate XML/YAML. `lerobot`
+validates Linear IR and compiles BT artifacts.
+
+Dry-run planner service:
+
+```bash
+cd ~/panda_live_viewer
+source /opt/ros/$ROS_DISTRO/setup.bash
+source ~/lerobot/install/setup.bash
+
+python3 -m vlm_live.cli \
+  --ros-args \
+  -p planner_dry_run:=true \
+  -p lazy_load_model:=true \
+  -p require_generate_plan_service:=true
+```
+
+Live planner service, only after dry-run service and `lerobot --no-run`
+generation pass:
+
+```bash
+python3 -m vlm_live.cli \
+  --ros-args \
+  -p planner_dry_run:=false \
+  -p lazy_load_model:=true \
+  -p require_generate_plan_service:=true
+```
+
+Check the ROS service:
+
+```bash
+ros2 service list | grep /lerobot_bt/generate_plan
+ros2 service type /lerobot_bt/generate_plan
+```
+
+Expected type:
+
+```text
+lerobot_bt_interfaces/srv/GenerateTaskPlan
+```
+
+`lazy_load_model:=true` defers Qwen/GPU loading until a live VLM call actually
+needs the model. With `planner_dry_run:=true`, the service should answer
+without loading Qwen.
+
+`require_generate_plan_service:=true` makes startup fail if
+`lerobot_bt_interfaces/srv/GenerateTaskPlan` is unavailable; source and build
+the `lerobot` ROS workspace before starting this node.
+
+Robot-day runbook: see the sibling checkout
+`~/lerobot/docs/runtime_bt_generation_robot_runbook.md` (or
+`../lerobot/docs/runtime_bt_generation_robot_runbook.md` when both repos share
+the same parent directory).
+
+> WARNING: This repo does not generate XML/YAML. `lerobot` validates and
+> compiles.
+
 ## ROS Planning Service
 
 `/lerobot_bt/generate_plan` is implemented on the VLM node.
@@ -78,8 +138,9 @@ See `bt_planning/` for helpers to build prompts and parse Linear IR JSON plans.
 
 ## Tests & Checks
 
-- If tests exist, run: `python -m pytest -svv`
-- If no tests, run: `python -m compileall .`
+- Run unit tests: `python3 -m unittest discover -v`
+- Run compile check: `python3 -m compileall .`
+- Do not report `pytest` as passing unless it is installed and actually run.
 
 
 ## Dry-run Planner
