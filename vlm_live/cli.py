@@ -20,3 +20,7 @@ def main() -> None:
             node.destroy_node()
         executor.shutdown()
         rclpy.shutdown()
+
+
+if __name__ == "__main__":
+    main()

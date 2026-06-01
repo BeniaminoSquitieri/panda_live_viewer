@@ -4,7 +4,7 @@ import json
 import threading
 import time
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 import numpy as np
 import rclpy
@@ -36,7 +36,6 @@ from .const import (
 )
 from .camera import compose, decode_image
 from .experiment_log import append_verifier_event, build_verifier_event
-from .model import load_model, run_inference, run_text_inference
 from .prompt import build_prompt, fit_status
 from .protocol import build_result_payload, coerce_result_for_request, parse_request
 from .view import start_view
@@ -186,6 +185,7 @@ class VlmNode(Node):
         self.processor = None
         self.model = None
         self.device = None
+        self._model_backend_cache = None
 
     def _init_ros_interfaces(self) -> None:
         """Create ROS subscriptions and publishers."""
@@ -236,10 +236,48 @@ class VlmNode(Node):
             return "GenerateTaskPlan service disabled"
         return self.plan_service
 
+    def _import_model_backend(
+        self,
+    ) -> tuple[Callable[..., tuple], Callable[..., tuple[str, str]], Callable[..., str]]:
+        """Import heavy VLM backend only when a live model call is requested."""
+        try:
+            from .model import (
+                load_model as load_model_fn,
+                run_inference as run_inference_fn,
+                run_text_inference as run_text_inference_fn,
+            )
+        except ModuleNotFoundError as exc:
+            missing_dependency = exc.name or "unknown"
+            if missing_dependency in {"qwen_vl_utils", "transformers", "torch"}:
+                raise RuntimeError(
+                    "Missing VLM dependency "
+                    f"{missing_dependency!r}. Install model runtime dependencies "
+                    "(qwen_vl_utils, transformers, torch) before live VLM calls. "
+                    "Dry-run planner mode can run without these dependencies when "
+                    "lazy_load_model=true."
+                ) from exc
+            raise
+        return load_model_fn, run_inference_fn, run_text_inference_fn
+
+    def _model_backend(self) -> tuple[Callable[..., tuple], Callable[..., tuple[str, str]], Callable[..., str]]:
+        if self._model_backend_cache is None:
+            self._model_backend_cache = self._import_model_backend()
+        return self._model_backend_cache
+
+    def _load_model_fn(self) -> Callable[..., tuple]:
+        return self._model_backend()[0]
+
+    def _run_inference_fn(self) -> Callable[..., tuple[str, str]]:
+        return self._model_backend()[1]
+
+    def _run_text_inference_fn(self) -> Callable[..., str]:
+        return self._model_backend()[2]
+
     def _load_vlm(self) -> None:
         """Load processor and model weights."""
         self.get_logger().info(f"Loading VLM from {self.model_path}")
-        self.processor, self.model, self.device = load_model(self.model_path)
+        load_model_fn = self._load_model_fn()
+        self.processor, self.model, self.device = load_model_fn(self.model_path)
 
     def _vlm_loaded(self) -> bool:
         return self.processor is not None and self.model is not None and self.device is not None
@@ -384,7 +422,8 @@ class VlmNode(Node):
         prompt = build_prompt(request, self.reasoning)
         with self.inference_lock:
             self._ensure_vlm_loaded()
-            return run_inference(
+            run_inference_fn = self._run_inference_fn()
+            return run_inference_fn(
                 scene=scene,
                 prompt=prompt,
                 processor=self.processor,
@@ -403,7 +442,8 @@ class VlmNode(Node):
 
         with self.inference_lock:
             self._ensure_vlm_loaded()
-            return run_text_inference(
+            run_text_inference_fn = self._run_text_inference_fn()
+            return run_text_inference_fn(
                 scene=scene,
                 prompt=prompt,
                 processor=self.processor,

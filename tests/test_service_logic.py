@@ -82,6 +82,19 @@ class GeneratePlanServiceLogicTests(unittest.TestCase):
             registry()["canonical_task_sequence"],
         )
 
+    def test_dry_run_ignores_missing_model_dependencies(self):
+        def fail_with_missing_dependency(_prompt):
+            raise ModuleNotFoundError("No module named 'qwen_vl_utils'")
+
+        result = build_generate_plan_response(
+            task_name="make_sandwich",
+            planner_registry_json=json.dumps(registry()),
+            dry_run=True,
+            vlm_backend=fail_with_missing_dependency,
+        )
+
+        self.assertTrue(result.success, result.error_message)
+
 
 if __name__ == "__main__":
     unittest.main()

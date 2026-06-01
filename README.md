@@ -66,6 +66,8 @@ lerobot_bt_interfaces/srv/GenerateTaskPlan
 `lazy_load_model:=true` defers Qwen/GPU loading until a live VLM call actually
 needs the model. With `planner_dry_run:=true`, the service should answer
 without loading Qwen.
+This allows dry-run planner service startup even when `qwen_vl_utils`,
+`transformers`, and `torch` are not installed.
 
 `require_generate_plan_service:=true` makes startup fail if
 `lerobot_bt_interfaces/srv/GenerateTaskPlan` is unavailable; source and build
