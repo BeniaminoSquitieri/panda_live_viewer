@@ -20,6 +20,35 @@ class GeneratePlanResult:
     prompt: str = ""
 
 
+def _normalize_vlm_plan_response(raw_plan: str, task_name: str) -> str:
+    """Coerce common VLM shape errors into strict Linear IR JSON.
+
+    Accepts responses like {"plan": [...]} and rewrites them into
+    {"task_name": <task_name>, "steps": [...]}. Leaves other responses
+    untouched so the parser can return a precise error.
+    """
+    text = (raw_plan or "").strip()
+    if not text or not (text.startswith("{") and text.endswith("}")):
+        return raw_plan
+
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return raw_plan
+
+    if not isinstance(payload, dict) or "steps" in payload:
+        return raw_plan
+
+    if "plan" in payload and isinstance(payload["plan"], list):
+        normalized = {
+            "task_name": payload.get("task_name") or task_name,
+            "steps": payload["plan"],
+        }
+        return json.dumps(normalized)
+
+    return raw_plan
+
+
 def _loads_json_object(raw: str, field_name: str, required: bool) -> Dict:
     text = (raw or "").strip()
     if not text:
@@ -101,6 +130,7 @@ def build_generate_plan_response(
             if vlm_backend is None:
                 raise RuntimeError("VLM planner backend is not configured.")
             raw_plan = vlm_backend(prompt)
+            raw_plan = _normalize_vlm_plan_response(raw_plan, normalized_task_name)
             plan = parse_linear_ir_plan(raw_plan)
 
         plan_json = json.dumps(plan, indent=2)

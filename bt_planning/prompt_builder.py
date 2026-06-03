@@ -74,6 +74,8 @@ def build_planner_prompt(task_name: str, planner_registry_json: dict, scene_fact
         "Instructions:",
         "- Return Linear IR JSON only.",
         "- Return a valid JSON plan only.",
+        "- The JSON must be an object with keys: task_name (string) and steps (list).",
+        "- Use steps, not plan. Do NOT wrap steps inside a plan field.",
         "- Do NOT return XML.",
         "- Do NOT include prose.",
         "- Do NOT invent skill names.",
