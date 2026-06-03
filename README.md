@@ -25,11 +25,49 @@ This repo owns the visual side: camera scene, VLM planner service, and VLM
 verification during BT execution. It does not generate XML/YAML. `lerobot`
 validates Linear IR and compiles BT artifacts.
 
+## ROS environment setup (system or conda)
+
+If you use system ROS (apt in `/opt/ros`):
+
+```bash
+source /opt/ros/$ROS_DISTRO/setup.bash
+```
+
+If you use a conda/robostack ROS env (e.g., `ros2_jazzy`), `/opt/ros` may not
+exist. Use the conda prefix instead:
+
+```bash
+conda activate ros2_jazzy
+source $CONDA_PREFIX/setup.bash
+```
+
+`panda_live_viewer` itself is not a ROS package (no `package.xml`), so running
+`colcon build` here will report `0` packages and will not create
+`install/setup.bash`. The ROS workspace to build is `~/lerobot`.
+
+## lerobot ROS workspace (interfaces only)
+
+The planner service requires `lerobot_bt_interfaces` to be built in a ROS
+workspace (commonly `~/lerobot`). A minimal workspace containing only this
+package is enough. Example:
+
+```bash
+mkdir -p ~/lerobot/src
+
+git clone --depth 1 --branch runtime-bt-generation-mvp-c \
+  https://github.com/BeniaminoSquitieri/lerobot.git /tmp/lerobot_src
+cp -a /tmp/lerobot_src/src/lerobot_bt_interfaces ~/lerobot/src/
+rm -rf /tmp/lerobot_src
+
+cd ~/lerobot
+colcon build --symlink-install
+```
+
 Dry-run planner service:
 
 ```bash
 cd ~/panda_live_viewer
-source /opt/ros/$ROS_DISTRO/setup.bash
+source /opt/ros/$ROS_DISTRO/setup.bash  # or: source $CONDA_PREFIX/setup.bash
 source ~/lerobot/install/setup.bash
 
 python3 -m vlm_live.cli \
@@ -112,7 +150,7 @@ The ROS parameter `require_generate_plan_service:=true` fails startup if
 environment with:
 
 ```bash
-source /opt/ros/$ROS_DISTRO/setup.bash
+source /opt/ros/$ROS_DISTRO/setup.bash  # or: source $CONDA_PREFIX/setup.bash
 source ~/lerobot/install/setup.bash
 ```
 
