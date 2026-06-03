@@ -69,12 +69,21 @@ def parse_request(msg: "String", logger) -> Optional[Dict[str, Any]]:
     task_text = payload.get("task")
     task_text = str(task_text).strip() if task_text is not None else ""
 
+    check_period_s = None
+    check_period_raw = payload.get("check_period_s")
+    if check_period_raw is not None:
+        try:
+            check_period_s = max(0.0, float(check_period_raw))
+        except (TypeError, ValueError):
+            check_period_s = None
+
     return {
         "skill_name": skill_name,
         "attempt_id": attempt_id,
         "message": message,
         "task": task_text,
         "allowed_statuses": clean_statuses(payload.get("allowed_statuses")),
+        "check_period_s": check_period_s,
     }
 
 

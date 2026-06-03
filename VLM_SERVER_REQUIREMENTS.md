@@ -42,7 +42,7 @@ The request message is a JSON object stored in the `data` field of
 | `task` | `string` | No | Task description added to the VLM prompt |
 | `message` | `string` | No | Behavior Tree context message added to the VLM prompt |
 | `allowed_statuses` | `list[string]` | No | Status values accepted by the caller; invalid values are ignored |
-
+| `check_period_s` | `float` | No | Per-request re-check cadence (seconds) for non-final statuses; overrides `check_period_seconds`. Robot skills send `0.0` (re-check as fast as inference allows); omit for human gates |
 Only `skill_name` is required. Missing or invalid optional fields are normalized
 by `vlm_live/protocol.py`. The current `lerobot` runtime publishes
 `RUNNING`/`SUCCESS`/`FAILURE` only; `WAIT_HUMAN` is an opt-in extension and is
@@ -94,7 +94,11 @@ C++ `GetSkillVerification` polling node handles only `RUNNING`, `SUCCESS`, and
 4. The raw VLM output is parsed into one supported `status`.
 5. If the VLM output contains `REASON=...`, only the reason text is published in
    `message`.
-6. Non-final statuses are reevaluated after `check_period_seconds`.
+6. Non-final statuses are reevaluated after `check_period_seconds`, unless the
+   request carries a `check_period_s` field, in which case that per-request
+   cadence is used instead (e.g. robot skills send `0.0` to re-check the scene
+   as fast as inference allows, while human gates omit it and keep the slower
+   node default).
 7. `SUCCESS`, `FAILURE`, and allowed `WAIT_HUMAN` clear the active request.
    A mapped `WAIT_HUMAN` remains `RUNNING` and keeps the request active.
 

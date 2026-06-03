@@ -558,7 +558,12 @@ class VlmNode(Node):
                         self.req = None
                 self.wake.clear()
             else:
-                self.wake.wait(timeout=self.check_s)
+                # Honor a per-request re-check cadence when provided (robot
+                # skills request a much faster cadence than human gates so the
+                # robot stops as soon as the scene confirms task completion).
+                request_period = request.get("check_period_s")
+                wait_s = self.check_s if request_period is None else request_period
+                self.wake.wait(timeout=wait_s)
                 self.wake.clear()
 
     def destroy_node(self):
