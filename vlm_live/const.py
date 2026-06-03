@@ -1,11 +1,10 @@
 """Shared defaults and protocol constants for the Panda VLM live verifier."""
 
-# Hugging Face repo id (or local path). On first run the weights are downloaded
-# and cached under ~/.cache/huggingface/hub, so later runs reuse the local copy
-# without re-downloading. Smaller than Qwen3-VL-32B for faster scene checks;
-# drop to "Qwen/Qwen3-VL-4B-Instruct" or "Qwen/Qwen3-VL-2B-Instruct" if you need
-# even faster inference, or restore the local 32B path for max quality.
-MODEL_PATH = "Qwen/Qwen3-VL-8B-Instruct"
+# Local 32B checkpoint used by default for the highest scene-understanding
+# quality on safety-critical semantic gates. Smaller Hub models are still
+# available via the ROS parameter `model_path` when faster but less reliable
+# checks are acceptable.
+MODEL_PATH = "/home/bsquitieri-iit.local/models/Qwen3-VL-32B-Instruct"
 
 FRONT_TOPIC = "/panda/camera/front/image_compressed"
 WRIST_TOPIC = "/panda/camera/wrist/image_compressed"

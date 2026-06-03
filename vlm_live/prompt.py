@@ -29,6 +29,8 @@ def build_prompt(request: Dict[str, Any], reasoning: bool) -> str:
     task_line = f"Task description: {task_text}\n" if task_text else ""
     common_header = (
         "You are a robotic task verifier. Inspect the live camera scene and decide whether the requested condition is satisfied.\n"
+        "The image shows two camera views side by side: the LEFT half is the fixed 'Front camera' and the RIGHT half is the moving 'Wrist camera' mounted on the gripper.\n"
+        "The two cameras see the same workspace from different angles, so each object is usually visible in only one view. Consider an object PRESENT if it is visible in AT LEAST ONE of the two views; do NOT require it to appear in both.\n"
         f"Check name: {request['skill_name']}\n"
         f"Attempt id: {request['attempt_id']}\n"
         f"{task_line}"
