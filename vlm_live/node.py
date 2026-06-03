@@ -23,6 +23,7 @@ from .const import (
     MAX_NEW_TOKENS,
     MODEL_PATH,
     PLANNER_MAX_NEW_TOKENS,
+    SCENE_FACTS_TOPIC,
     STATUS_FAILURE,
     STATUS_RUNNING,
     STATUS_SUCCESS,
@@ -68,6 +69,7 @@ class NodeConfig:
     planner_max_tokens: int
     lazy_load_model: bool
     require_generate_plan_service: bool
+    scene_facts_topic: str
     verifier_experiment_log_path: str
 
 
@@ -98,6 +100,7 @@ class VlmNode(Node):
         self.planner_max_tokens = cfg.planner_max_tokens
         self.lazy_load_model = cfg.lazy_load_model
         self.require_generate_plan_service = cfg.require_generate_plan_service
+        self.scene_facts_topic = cfg.scene_facts_topic
         self.verifier_experiment_log_path = cfg.verifier_experiment_log_path
 
         self._init_state()
@@ -137,6 +140,7 @@ class VlmNode(Node):
         self.declare_parameter("lazy_load_model", True)
         # Fail fast when lerobot's GenerateTaskPlan interface was not sourced.
         self.declare_parameter("require_generate_plan_service", True)
+        self.declare_parameter("scene_facts_topic", SCENE_FACTS_TOPIC)
         # Optional append-only JSONL log of verifier events (provenance only).
         # Empty string disables logging and never changes published payloads.
         self.declare_parameter("verifier_experiment_log_path", "")
@@ -167,6 +171,7 @@ class VlmNode(Node):
             require_generate_plan_service=bool(
                 self.get_parameter("require_generate_plan_service").value
             ),
+            scene_facts_topic=str(self.get_parameter("scene_facts_topic").value),
             verifier_experiment_log_path=str(
                 self.get_parameter("verifier_experiment_log_path").value
             ),
@@ -186,6 +191,7 @@ class VlmNode(Node):
         self.model = None
         self.device = None
         self._model_backend_cache = None
+        self.latest_scene_facts_json = ""
 
     def _init_ros_interfaces(self) -> None:
         """Create ROS subscriptions and publishers."""
@@ -219,6 +225,13 @@ class VlmNode(Node):
             String,
             self.req_topic,
             self._on_req,
+            10,
+            callback_group=self.callback_group,
+        )
+        self.scene_facts_sub = self.create_subscription(
+            String,
+            self.scene_facts_topic,
+            self._on_scene_facts,
             10,
             callback_group=self.callback_group,
         )
@@ -304,6 +317,25 @@ class VlmNode(Node):
 
         with self.lock:
             self.frames[camera_name] = frame
+
+    def _on_scene_facts(self, msg: String) -> None:
+        raw = (msg.data or "").strip()
+        if not raw:
+            return
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            self.get_logger().warning(f"Ignoring malformed scene facts JSON: {exc}")
+            return
+        if not isinstance(payload, dict):
+            self.get_logger().warning("Ignoring scene facts payload because it is not a JSON object")
+            return
+        with self.lock:
+            self.latest_scene_facts_json = json.dumps(payload)
+
+    def _get_latest_scene_facts_json(self) -> str:
+        with self.lock:
+            return self.latest_scene_facts_json
 
     def _publish_result(self, request: dict, status: str, reason: str) -> None:
         payload = build_result_payload(request, status, reason)
@@ -459,7 +491,7 @@ class VlmNode(Node):
         result = build_generate_plan_response(
             task_name=request.task_name,
             planner_registry_json=request.planner_registry_json,
-            scene_facts_json=request.scene_facts_json,
+            scene_facts_json=request.scene_facts_json or self._get_latest_scene_facts_json(),
             dry_run=self.planner_dry_run,
             vlm_backend=self._run_planner_vlm,
         )

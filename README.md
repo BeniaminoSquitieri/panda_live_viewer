@@ -157,6 +157,39 @@ source ~/lerobot/install/setup.bash
 Set `require_generate_plan_service:=false` only when intentionally running the
 verifier without the planning service.
 
+## Perception Scene Facts
+
+The passive RGB-D perception bridge can be run alongside the VLM node:
+
+```bash
+python3 -m perception.cli \
+  --ros-args \
+  -p planner_registry_json:='{"objects":[]}'
+```
+
+It subscribes to:
+
+- `/panda/camera/front/image_compressed`
+- `/panda/camera/front/depth`
+- `/panda/camera/front/camera_info`
+- `/panda/camera/wrist/image_compressed`
+- `/panda/camera/wrist/depth`
+- `/panda/camera/wrist/camera_info`
+
+It publishes latched JSON scene facts on `/perception/scene_facts` and, after
+`lerobot_bt_interfaces` is rebuilt with `QueryObjectPose.srv`, serves object
+pose lookups on `/perception/query_pose`.
+
+The VLM planner node also subscribes to `/perception/scene_facts`. If a
+`/lerobot_bt/generate_plan` request omits `scene_facts_json`, the latest
+published scene facts are injected into the planner prompt.
+
+The default segmenter is fail-closed: without a configured segmentation backend
+it publishes camera availability and warnings, but no invented object poses.
+When detections are supplied through a future segmenter, depth is back-projected
+with `CameraInfo`, pose confidence/covariance are emitted, and missing or stale
+RGB-D/TF data degrades the fact instead of fabricating geometry.
+
 ## Planner Output Path
 
 - Debug outputs (raw model responses, Linear IR JSON) may be saved under `generated_plans/`.

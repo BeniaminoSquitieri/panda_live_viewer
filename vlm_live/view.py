@@ -4,7 +4,6 @@ import threading
 import time
 from typing import Callable, Optional, Tuple
 
-import cv2
 import numpy as np
 import rclpy
 
@@ -68,6 +67,11 @@ def start_view(get_frames: Callable[[], Tuple[Optional[np.ndarray], Optional[np.
         from flask import Flask, Response, render_template_string
     except Exception as exc:
         logger.warning(f"Viewer disabled (Flask import failed): {exc}")
+        return
+    try:
+        import cv2
+    except ModuleNotFoundError as exc:
+        logger.warning(f"Viewer disabled (OpenCV import failed): {exc}")
         return
 
     app = Flask(__name__)

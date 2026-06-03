@@ -4,19 +4,28 @@ import tempfile
 from pathlib import Path
 from typing import Optional, Tuple
 
-import cv2
 import numpy as np
 from sensor_msgs.msg import CompressedImage
 
 
+def _cv2():
+    try:
+        import cv2
+    except ModuleNotFoundError as exc:
+        raise RuntimeError("OpenCV (cv2) is required for camera image processing.") from exc
+    return cv2
+
+
 def decode_image(msg: CompressedImage) -> Optional[np.ndarray]:
     """Decode a ROS compressed image message into a BGR OpenCV frame."""
+    cv2 = _cv2()
     np_arr = np.frombuffer(msg.data, np.uint8)
     return cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
 
 
 def placeholder(label: str, size: Tuple[int, int] = (640, 480)) -> np.ndarray:
     """Create a black placeholder frame with a centered status label."""
+    cv2 = _cv2()
     width, height = size
     image = np.zeros((height, width, 3), dtype=np.uint8)
     cv2.putText(
@@ -33,6 +42,7 @@ def placeholder(label: str, size: Tuple[int, int] = (640, 480)) -> np.ndarray:
 
 def label(frame: np.ndarray, title: str) -> np.ndarray:
     """Return a copy of the frame with a visible title overlay."""
+    cv2 = _cv2()
     output = frame.copy()
     cv2.putText(
         output,
@@ -48,6 +58,7 @@ def label(frame: np.ndarray, title: str) -> np.ndarray:
 
 def compose(front: Optional[np.ndarray], wrist: Optional[np.ndarray]) -> Optional[np.ndarray]:
     """Build a side-by-side scene from the front and wrist cameras."""
+    cv2 = _cv2()
     if front is None and wrist is None:
         return None
 
@@ -63,6 +74,7 @@ def compose(front: Optional[np.ndarray], wrist: Optional[np.ndarray]) -> Optiona
 
 def save_image(scene: np.ndarray) -> str:
     """Persist a scene to a temporary PNG file and return the file path."""
+    cv2 = _cv2()
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
         cv2.imwrite(tmp.name, scene)
         return tmp.name
