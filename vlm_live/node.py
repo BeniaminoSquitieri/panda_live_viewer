@@ -552,15 +552,21 @@ class VlmNode(Node):
                 error_message=error_message,
             )
 
-            if status in (STATUS_SUCCESS, STATUS_FAILURE, STATUS_WAIT_HUMAN):
+            if status in (STATUS_SUCCESS, STATUS_WAIT_HUMAN):
                 with self.lock:
                     if self.req_id == request_id:
                         self.req = None
                 self.wake.clear()
             else:
-                # Honor a per-request re-check cadence when provided (robot
-                # skills request a much faster cadence than human gates so the
-                # robot stops as soon as the scene confirms task completion).
+                # RUNNING and FAILURE are both non-terminal here: the BT gate
+                # node converts a FAILURE verdict into RUNNING and keeps the
+                # gate open, polling for a fresh verdict. If we stopped
+                # re-evaluating on FAILURE the gate would keep reading the same
+                # stale verdict forever and never react to the scene changing
+                # (e.g. the human finally placing the cup). So keep inferring
+                # on the same attempt and honor the per-request re-check cadence
+                # (robot skills request a much faster cadence than human gates
+                # so the robot stops as soon as the scene confirms completion).
                 request_period = request.get("check_period_s")
                 wait_s = self.check_s if request_period is None else request_period
                 self.wake.wait(timeout=wait_s)
