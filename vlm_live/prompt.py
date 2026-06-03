@@ -31,6 +31,8 @@ def build_prompt(request: Dict[str, Any], reasoning: bool) -> str:
         "You are a robotic task verifier. Inspect the live camera scene and decide whether the requested condition is satisfied.\n"
         "The image shows two camera views side by side: the LEFT half is the fixed 'Front camera' and the RIGHT half is the moving 'Wrist camera' mounted on the gripper.\n"
         "The two cameras see the same workspace from different angles, so each object is usually visible in only one view. Consider an object PRESENT if it is visible in AT LEAST ONE of the two views; do NOT require it to appear in both.\n"
+        "Inspect EACH half of the image separately and exhaustively before concluding anything is missing: first scan the LEFT (Front) half, then scan the RIGHT (Wrist) half. An object counts as present if it appears in EITHER scan.\n"
+        "Some objects are easy to miss: cups and mugs may be transparent, white, reflective, empty, small, tilted, partially occluded by other objects, or only partially inside the frame (e.g. at an edge or in the gripper). Do NOT report such an object as absent unless you have carefully searched BOTH halves and still cannot find it.\n"
         f"Check name: {request['skill_name']}\n"
         f"Attempt id: {request['attempt_id']}\n"
         f"{task_line}"
