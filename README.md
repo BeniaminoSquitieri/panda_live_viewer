@@ -197,6 +197,131 @@ emitted, and missing or stale RGB-D/TF data degrades the fact instead of
 fabricating geometry. `require_query_pose_service` defaults to true so the node
 fails fast when `QueryObjectPose.srv` has not been rebuilt and sourced.
 
+## Robot-Day Step-by-Step Testing
+
+End-to-end smoke test for the RGB-D perception path on the real robot. Run the
+steps in order; do not skip the verification command at each step.
+
+> Camera ownership: the **lerobot BT server** opens the RealSense devices and
+> republishes their frames. Do **NOT** start `panda_live_camera` (or any other
+> RealSense publisher) at the same time — opening the same device twice causes a
+> hardware conflict and frame drops.
+
+### 1. Build & source both workspaces
+
+```bash
+# lerobot ROS workspace (rebuild after QueryObjectPose.srv changes)
+cd ~/lerobot
+colcon build --packages-select lerobot_bt_interfaces lerobot_bt_python
+source install/setup.bash
+
+# panda_live_viewer environment
+cd ~/panda_live_viewer
+source <your-conda-or-venv-activate>
+```
+
+### 2. Start the lerobot publisher (camera owner)
+
+Launch the BT executor whose YAML enables depth + camera republishing, e.g.
+`make_coffee_executor.yaml`. Confirm the config has `use_depth: true` and the
+`camera_*_map` / `camera_static_tf_map` entries populated.
+
+### 3. Verify the RGB-D topics are live
+
+```bash
+# color (compressed), depth, and intrinsics for each camera
+ros2 topic hz /panda/camera/front/image_compressed
+ros2 topic hz /panda/camera/front/depth
+ros2 topic echo --once /panda/camera/front/camera_info
+ros2 topic hz /panda/camera/wrist/image_compressed
+ros2 topic hz /panda/camera/wrist/depth
+ros2 topic echo --once /panda/camera/wrist/camera_info
+```
+
+Expected: non-zero, stable Hz on the image/depth topics; `camera_info` with a
+non-empty `k` (fx/fy/ppx/ppy) and `distortion_model: plumb_bob`. Depth and color
+must report the **same width/height** (depth is aligned to color).
+
+### 4. Verify the static TF frames
+
+```bash
+ros2 run tf2_ros tf2_echo base_link panda_camera_front
+ros2 run tf2_ros tf2_echo base_link panda_camera_wrist
+```
+
+Expected: a steady transform (no "frame does not exist" errors). The perception
+node lifts poses into `base_link` using these transforms.
+
+### 5. Start the perception node
+
+```bash
+cd ~/panda_live_viewer
+python3 -m perception.cli \
+  --ros-args \
+  -p planner_registry_json:='{"objects":[{"canonical_name":"cup","aliases":["mug"]}]}' \
+  -p segmenter_backend:=owlvit \
+  -p require_query_pose_service:=true
+```
+
+Expected: the node logs camera/TF availability and the OWL-ViT model load. It
+fails fast if `QueryObjectPose.srv` was not rebuilt/sourced (step 1).
+
+### 6. Verify scene facts
+
+```bash
+ros2 topic echo --once /perception/scene_facts
+```
+
+Expected JSON with per-object entries containing `pose` (translation +
+quaternion), `covariance`, `pose_confidence`, `pose_residual_m`, `inlier_ratio`,
+and `warnings`. With no detection, the fact degrades (availability + warning)
+instead of fabricating a pose.
+
+### 7. Query a pose via the service
+
+```bash
+ros2 service call /perception/query_pose \
+  lerobot_bt_interfaces/srv/QueryObjectPose \
+  "{object_name: 'cup', require_fresh: true, max_age_s: 1.0}"
+```
+
+Expected: `success: true` with a `pose_json` payload, or `success: false` with a
+clear `error_message` (e.g. stale data) — never a silent empty pose.
+
+### 8. Metric sanity checks
+
+- Place the object at a known distance; confirm `pose.translation` in
+  `base_link` matches the tape-measured position within a few centimeters.
+- Confirm `pose_residual_m` is small and `inlier_ratio` is high for a clean
+  detection; both degrade for partial/occluded views.
+- Confirm `warnings` flags expected conditions (`insufficient_depth`,
+  `orientation_estimated_pca`, stale RGB-D/TF) rather than staying empty when
+  data is poor.
+
+### 9. Planner + gate (optional end-to-end)
+
+Issue a `/lerobot_bt/generate_plan` request **without** `scene_facts_json`; the
+planner injects the latest `/perception/scene_facts` automatically. Confirm the
+Linear IR plan references the perceived objects.
+
+### Troubleshooting
+
+- No depth / poses always empty: re-check `use_depth: true` and that depth and
+  color report the same resolution (alignment). If depth resolution differs,
+  the core `rs.align` step is not running.
+- `query_pose` service missing: rebuild `lerobot_bt_interfaces` and re-source.
+- Frame drops / device busy: ensure only the lerobot server owns the RealSense
+  devices (no `panda_live_camera`).
+- Wrong object location: verify the `base_link`→camera TF and camera index
+  mapping (front vs wrist) in the executor YAML.
+
+### Collect logs for review
+
+```bash
+ros2 topic echo /perception/scene_facts > /tmp/scene_facts.log &
+# set verifier_experiment_log_path to capture verifier events (optional)
+```
+
 ## Planner Output Path
 
 - Debug outputs (raw model responses, Linear IR JSON) may be saved under `generated_plans/`.
