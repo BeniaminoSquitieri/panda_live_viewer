@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from perception.geometry import (
     CameraIntrinsics,
@@ -27,6 +28,24 @@ def test_back_project_mask_uses_intrinsics_and_depth_scale():
             dtype=np.float32,
         ),
     )
+
+
+def test_back_project_mask_rejects_mask_shape_mismatch():
+    depth = np.ones((2, 2), dtype=np.uint16)
+    mask = np.ones((2, 3), dtype=bool)
+    intrinsics = CameraIntrinsics(width=2, height=2, fx=1.0, fy=1.0, cx=0.0, cy=0.0)
+
+    with pytest.raises(ValueError, match="must match mask shape"):
+        back_project_mask(depth=depth, mask=mask, intrinsics=intrinsics)
+
+
+def test_back_project_mask_rejects_intrinsics_shape_mismatch():
+    depth = np.ones((2, 2), dtype=np.uint16)
+    mask = np.ones((2, 2), dtype=bool)
+    intrinsics = CameraIntrinsics(width=3, height=2, fx=1.0, fy=1.0, cx=0.0, cy=0.0)
+
+    with pytest.raises(ValueError, match="does not match intrinsics"):
+        back_project_mask(depth=depth, mask=mask, intrinsics=intrinsics)
 
 
 def test_quaternion_rotate_vector_identity():
