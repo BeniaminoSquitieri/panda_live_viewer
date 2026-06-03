@@ -27,10 +27,12 @@ from .geometry import (
     camera_info_to_intrinsics,
     decode_depth_image,
     quaternion_multiply_xyzw,
+    rotate_covariance_6x6_xyzw,
     rotate_vector_xyzw,
     stamp_to_float,
 )
 from .pipeline import PerceptionPipeline
+from .segmenters import SegmenterConfig, build_segmenter
 
 try:
     from lerobot_bt_interfaces.srv import QueryObjectPose
@@ -64,7 +66,6 @@ class PerceptionNode(Node):
         super().__init__("panda_perception_scene_facts")
         self.callback_group = ReentrantCallbackGroup()
         self.lock = threading.Lock()
-        self.pipeline = PerceptionPipeline()
         self.cameras = {
             "front": _CameraCache(frame_id="front"),
             "wrist": _CameraCache(frame_id="wrist"),
@@ -75,6 +76,10 @@ class PerceptionNode(Node):
 
         self._declare_parameters()
         self._load_parameters()
+        self.pipeline = PerceptionPipeline(
+            segmenter=build_segmenter(self.segmenter_config, self.registry),
+            min_depth_points=self.min_depth_points,
+        )
         self._init_tf()
         self._init_ros_interfaces()
         self.get_logger().info(
@@ -95,8 +100,14 @@ class PerceptionNode(Node):
         self.declare_parameter("max_sync_delta_s", 0.15)
         self.declare_parameter("target_frame_id", "base_link")
         self.declare_parameter("planner_registry_json", "")
+        self.declare_parameter("segmenter_backend", "owlvit")
+        self.declare_parameter("segmenter_model_path", "google/owlvit-base-patch32")
+        self.declare_parameter("segmenter_score_threshold", 0.2)
+        self.declare_parameter("segmenter_mask_mode", "grabcut")
+        self.declare_parameter("segmenter_image_color_order", "bgr")
+        self.declare_parameter("min_depth_points", 25)
         self.declare_parameter("perception_log_path", "")
-        self.declare_parameter("require_query_pose_service", False)
+        self.declare_parameter("require_query_pose_service", True)
 
     def _load_parameters(self) -> None:
         self.image_topics = {
@@ -117,6 +128,14 @@ class PerceptionNode(Node):
         self.max_sync_delta_s = float(self.get_parameter("max_sync_delta_s").value)
         self.target_frame_id = str(self.get_parameter("target_frame_id").value)
         self.registry = self._load_registry(str(self.get_parameter("planner_registry_json").value))
+        self.segmenter_config = SegmenterConfig(
+            backend=str(self.get_parameter("segmenter_backend").value),
+            model_path=str(self.get_parameter("segmenter_model_path").value),
+            score_threshold=float(self.get_parameter("segmenter_score_threshold").value),
+            mask_mode=str(self.get_parameter("segmenter_mask_mode").value),
+            image_color_order=str(self.get_parameter("segmenter_image_color_order").value),
+        )
+        self.min_depth_points = int(self.get_parameter("min_depth_points").value)
         self.perception_log_path = str(self.get_parameter("perception_log_path").value)
         self.require_query_pose_service = bool(self.get_parameter("require_query_pose_service").value)
 
@@ -309,6 +328,14 @@ class PerceptionNode(Node):
             q_tf,
             {key: float(value) for key, value in pose["quaternion_xyzw"].items()},
         )
+        if "covariance" in fact:
+            try:
+                fact["covariance"] = rotate_covariance_6x6_xyzw(
+                    [float(value) for value in fact["covariance"]],
+                    q_tf,
+                )
+            except ValueError:
+                fact.setdefault("warnings", []).append("covariance_transform_failed")
         fact["frame_id"] = target_frame_id
         return fact
 

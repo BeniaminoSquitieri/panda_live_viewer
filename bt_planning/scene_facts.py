@@ -40,6 +40,8 @@ def build_object_pose_fact(
     pose_confidence: float = 0.0,
     covariance: Iterable[float] | None = None,
     seg_score: float | None = None,
+    pose_residual_m: float | None = None,
+    inlier_ratio: float | None = None,
     warnings: Iterable[str] | None = None,
 ) -> Dict[str, Any]:
     """Build one per-object scene fact with explicit uncertainty fields."""
@@ -60,6 +62,10 @@ def build_object_pose_fact(
         fact["covariance"] = [float(value) for value in covariance]
     if seg_score is not None:
         fact["seg_score"] = float(seg_score)
+    if pose_residual_m is not None:
+        fact["pose_residual_m"] = float(pose_residual_m)
+    if inlier_ratio is not None:
+        fact["inlier_ratio"] = float(inlier_ratio)
     return fact
 
 

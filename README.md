@@ -164,7 +164,7 @@ The passive RGB-D perception bridge can be run alongside the VLM node:
 ```bash
 python3 -m perception.cli \
   --ros-args \
-  -p planner_registry_json:='{"objects":[]}'
+  -p planner_registry_json:='{"objects":[{"canonical_name":"cup","aliases":["mug"]}]}'
 ```
 
 It subscribes to:
@@ -184,11 +184,18 @@ The VLM planner node also subscribes to `/perception/scene_facts`. If a
 `/lerobot_bt/generate_plan` request omits `scene_facts_json`, the latest
 published scene facts are injected into the planner prompt.
 
-The default segmenter is fail-closed: without a configured segmentation backend
-it publishes camera availability and warnings, but no invented object poses.
-When detections are supplied through a future segmenter, depth is back-projected
-with `CameraInfo`, pose confidence/covariance are emitted, and missing or stale
-RGB-D/TF data degrades the fact instead of fabricating geometry.
+The default segmenter backend is OWL-ViT through `transformers`, loaded lazily
+from `segmenter_model_path` (`google/owlvit-base-patch32` by default). It uses
+the registry object names as zero-shot labels and converts detections into
+box/GrabCut masks. Use `segmenter_backend:=noop` only for verifier-only dry
+runs. If the model or dependencies are unavailable, the node publishes
+availability plus a segmenter warning instead of invented object poses.
+
+When detections are available, depth is back-projected with `CameraInfo`, object
+orientation is estimated from point-cloud PCA, pose confidence/covariance are
+emitted, and missing or stale RGB-D/TF data degrades the fact instead of
+fabricating geometry. `require_query_pose_service` defaults to true so the node
+fails fast when `QueryObjectPose.srv` has not been rebuilt and sourced.
 
 ## Planner Output Path
 

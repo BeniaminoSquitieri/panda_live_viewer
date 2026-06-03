@@ -43,7 +43,9 @@ def test_pipeline_maps_registry_label_and_estimates_centroid_pose():
     assert fact["pose"]["translation"] == {"x": 0.5, "y": 0.5, "z": 1.0}
     assert 0.0 < fact["pose_confidence"] <= 0.8
     assert len(fact["covariance"]) == 36
-    assert "orientation_unestimated_centroid_fallback" in fact["warnings"]
+    assert "orientation_estimated_pca" in fact["warnings"]
+    assert "pose_residual_m" in fact
+    assert "inlier_ratio" in fact
 
 
 def test_pipeline_fails_closed_without_segmenter():
@@ -58,4 +60,4 @@ def test_pipeline_fails_closed_without_segmenter():
     )
 
     assert result.facts == {}
-    assert "segmenter_unconfigured_or_no_detections" in result.warnings
+    assert "segmenter_no_detections" in result.warnings

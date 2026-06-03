@@ -9,7 +9,7 @@ import numpy as np
 
 from bt_planning.scene_facts import build_object_pose_fact
 
-from .geometry import CameraIntrinsics, back_project_mask, centroid_pose, diagonal_covariance
+from .geometry import CameraIntrinsics, back_project_mask, estimate_pose_pca
 
 
 @dataclass(frozen=True)
@@ -162,12 +162,19 @@ class PerceptionPipeline:
                 translation = None
                 quaternion = None
                 covariance = None
+                pose_residual_m = None
+                inlier_ratio = None
             else:
-                translation, quaternion = centroid_pose(points)
-                covariance = diagonal_covariance(points)
+                pose = estimate_pose_pca(points)
+                translation = pose.translation
+                quaternion = pose.quaternion_xyzw
+                covariance = pose.covariance
                 density_score = min(points.shape[0] / float(self.min_depth_points * 4), 1.0)
-                confidence = max(0.0, min(float(detection.score) * density_score, 1.0))
-                object_warnings.append("orientation_unestimated_centroid_fallback")
+                confidence = max(0.0, min(float(detection.score) * density_score * pose.confidence, 1.0))
+                pose_residual_m = pose.residual_m
+                inlier_ratio = pose.inlier_ratio
+                object_warnings.extend(pose.warnings)
+                object_warnings.append("orientation_estimated_pca")
 
             facts[canonical_name] = build_object_pose_fact(
                 name=canonical_name,
@@ -179,10 +186,13 @@ class PerceptionPipeline:
                 pose_confidence=confidence,
                 covariance=covariance,
                 seg_score=detection.score,
+                pose_residual_m=pose_residual_m,
+                inlier_ratio=inlier_ratio,
                 warnings=object_warnings,
             )
 
         if not detections:
-            warnings.append("segmenter_unconfigured_or_no_detections")
+            segmenter_warning = str(getattr(self.segmenter, "status_warning", "") or "")
+            warnings.append(segmenter_warning or "segmenter_no_detections")
 
         return PipelineResult(facts=facts, warnings=warnings, detections_seen=len(detections))
