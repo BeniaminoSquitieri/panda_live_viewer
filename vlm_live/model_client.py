@@ -27,7 +27,7 @@ def _encode_image_b64(scene: np.ndarray) -> str:
     return base64.b64encode(buf.getvalue()).decode()
 
 
-def _call(socket_path: str, payload: dict, timeout: float = 120.0) -> dict:
+def _call(socket_path: str, payload: dict, timeout: float | None = None) -> dict:
     try:
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         sock.settimeout(timeout)
