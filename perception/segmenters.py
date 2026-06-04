@@ -74,6 +74,17 @@ class OwlVitSegmenter:
         return image
 
     @staticmethod
+    def _to_pil(image: np.ndarray) -> Any:
+        """Return a contiguous uint8 PIL.Image; the transformers pipeline rejects
+        numpy arrays (and reversed-stride views) for zero-shot object detection."""
+        from PIL import Image
+
+        array = np.ascontiguousarray(image)
+        if array.dtype != np.uint8:
+            array = np.clip(array, 0, 255).astype(np.uint8)
+        return Image.fromarray(array)
+
+    @staticmethod
     def _box_from_detection(detection: Mapping[str, Any], width: int, height: int) -> tuple[int, int, int, int]:
         raw_box = detection.get("box") or {}
         xmin = int(max(0, min(width - 1, round(float(raw_box.get("xmin", raw_box.get("x_min", 0)))))))
@@ -122,7 +133,8 @@ class OwlVitSegmenter:
             return []
         try:
             model_image = self._rgb_for_model(rgb)
-            outputs = model(model_image, candidate_labels=self.labels, threshold=self.score_threshold)
+            pil_image = self._to_pil(model_image)
+            outputs = model(pil_image, candidate_labels=self.labels, threshold=self.score_threshold)
         except Exception as exc:
             self.status_warning = f"segmenter_inference_error:{exc}"
             return []
