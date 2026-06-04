@@ -475,6 +475,19 @@ class PerceptionNode(Node):
         msg.data = json.dumps(scene_facts, sort_keys=True)
         self.scene_facts_pub.publish(msg)
 
+        if facts:
+            summary = ", ".join(
+                f"{name}[pose={'Y' if 'pose' in fact else 'N'} "
+                f"conf={float(fact.get('pose_confidence', 0.0)):.2f}]"
+                for name, fact in sorted(facts.items())
+            )
+        else:
+            summary = "<none>"
+        self.get_logger().info(
+            f"scene_facts: objects={summary} warnings={warnings}",
+            throttle_duration_sec=2.0,
+        )
+
     def _on_query_pose(self, request: Any, response: Any) -> Any:
         object_name = str(getattr(request, "object_name", "")).strip()
         if not object_name:
