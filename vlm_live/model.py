@@ -69,7 +69,12 @@ def run_text_inference(scene, prompt: str, processor, model, device, tokens: int
         )[0].strip()
 
         if log_out:
-            logger.info(f"VLM output: {output_text}")
+            status = parse_status(output_text)
+            reason = extract_reason(output_text)
+            if reason:
+                logger.info(f"VLM response: STATUS={status} REASON={reason}")
+            else:
+                logger.info(f"VLM response: STATUS={status}")
 
         return output_text
     finally:

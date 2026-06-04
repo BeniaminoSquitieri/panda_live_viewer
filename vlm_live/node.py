@@ -3,6 +3,7 @@
 import json
 import threading
 import time
+import traceback
 from dataclasses import dataclass
 from typing import Callable, Optional, Tuple
 
@@ -345,9 +346,12 @@ class VlmNode(Node):
         msg = String()
         msg.data = json.dumps(payload)
         self.status_pub.publish(msg)
-        self.get_logger().info(
-            f"{status}: {reason} (skill={payload['skill_name']}, attempt={payload['attempt_id']})"
-        )
+        if status == STATUS_RUNNING and reason == "VLM processing":
+            return
+        summary = f"{payload['skill_name']}#{payload['attempt_id']} -> {status}"
+        if reason:
+            summary += f" | REASON={reason}"
+        self.get_logger().info(summary)
 
     def _on_req(self, msg: String) -> None:
         request = parse_request(msg, self.get_logger())
@@ -359,17 +363,8 @@ class VlmNode(Node):
             self.req_id += 1
 
         self.get_logger().info(
-            f"Received VLM request for {request['skill_name']} (attempt {request['attempt_id']})"
+            f"VLM request: {request['skill_name']}#{request['attempt_id']}"
         )
-        if request.get("allowed_statuses"):
-            self.get_logger().info(f"Allowed statuses: {', '.join(request['allowed_statuses'])}")
-        task_text = request.get("task") or ""
-        if task_text:
-            self.get_logger().info(f"Task description: {task_text}")
-        if request.get("message"):
-            self.get_logger().info(f"BT message: {request['message']}")
-        request_prompt = build_prompt(request, self.reasoning)
-        self.get_logger().info(f"VLM prompt:\n{request_prompt}")
         self._publish_result(request, STATUS_RUNNING, "VLM processing")
         self.wake.set()
 
@@ -429,7 +424,10 @@ class VlmNode(Node):
             append_verifier_event(log_path, event)
         except Exception:
             # Logging must never break the verification loop.
-            self.get_logger().exception("Failed to write verifier experiment event")
+            self.get_logger().error(
+                "Failed to write verifier experiment event:\n"
+                f"{traceback.format_exc()}"
+            )
 
     def _start_viewer(self) -> None:
         start_view(
@@ -495,9 +493,6 @@ class VlmNode(Node):
             dry_run=self.planner_dry_run,
             vlm_backend=self._run_planner_vlm,
         )
-
-        if result.prompt:
-            self.get_logger().info(f"Planner prompt:\n{result.prompt}")
 
         response.success = result.success
         response.plan_json = result.plan_json
