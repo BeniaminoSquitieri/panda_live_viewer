@@ -21,7 +21,12 @@ class SegmenterConfig:
 
 def labels_from_registry(registry: Mapping[str, Any] | None) -> list[str]:
     mapper = RegistryMapper.from_registry(registry)
-    return sorted(mapper.canonical_names)
+    # Feed OWL-ViT the natural-language aliases (e.g. "coffee capsule") instead of
+    # only the canonical names with underscores ("coffee_capsule"), which the
+    # zero-shot detector handles poorly. canonicalize() maps every alias back.
+    labels = set(mapper.aliases.keys())
+    labels.update(mapper.canonical_names)
+    return sorted(labels)
 
 
 class OwlVitSegmenter:
