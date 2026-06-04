@@ -82,6 +82,8 @@ class PerceptionNode(Node):
             pose_max_depth_m=self.pose_max_depth_m,
             pose_depth_band_m=self.pose_depth_band_m,
             depth_scale_m=self.depth_scale_m,
+            support_preferences=self.support_preferences,
+            support_radius_m=self.support_radius_m,
         )
         self._init_tf()
         self._init_ros_interfaces()
@@ -115,6 +117,8 @@ class PerceptionNode(Node):
         self.declare_parameter("pose_max_depth_m", 0.0)
         self.declare_parameter("pose_depth_band_m", 0.0)
         self.declare_parameter("depth_scale_m", 0.001)
+        self.declare_parameter("support_preferences_json", "")
+        self.declare_parameter("support_radius_m", 0.0)
 
     def _load_parameters(self) -> None:
         self.image_topics = {
@@ -153,6 +157,13 @@ class PerceptionNode(Node):
         self.pose_max_depth_m = float(self.get_parameter("pose_max_depth_m").value)
         self.pose_depth_band_m = float(self.get_parameter("pose_depth_band_m").value)
         self.depth_scale_m = float(self.get_parameter("depth_scale_m").value)
+        self.support_preferences = {
+            str(key): str(value)
+            for key, value in self._load_json_param(
+                str(self.get_parameter("support_preferences_json").value)
+            ).items()
+        }
+        self.support_radius_m = float(self.get_parameter("support_radius_m").value)
 
     def _init_tf(self) -> None:
         try:
@@ -162,6 +173,26 @@ class PerceptionNode(Node):
             return
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
+
+    @staticmethod
+    def _load_json_param(raw_value: str) -> dict[str, Any]:
+        """Load a JSON object from an inline string or a file path (or {})."""
+        raw_value = (raw_value or "").strip()
+        if not raw_value:
+            return {}
+        if not raw_value.startswith(("{", "[")):
+            path = os.path.expanduser(raw_value)
+            if os.path.isfile(path):
+                with open(path, "r", encoding="utf-8") as handle:
+                    raw_value = handle.read().strip()
+            else:
+                raise FileNotFoundError(
+                    f"JSON parameter '{path}' is not a file and is not inline JSON."
+                )
+        payload = json.loads(raw_value)
+        if not isinstance(payload, dict):
+            raise ValueError("JSON parameter must be a JSON object.")
+        return payload
 
     @staticmethod
     def _load_registry(raw_value: str) -> dict[str, Any]:

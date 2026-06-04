@@ -92,6 +92,21 @@ class PipelineResult:
     detections_seen: int
 
 
+@dataclass
+class _Candidate:
+    """One detection retained for per-object resolution."""
+
+    fact: dict[str, Any]
+    centroid: tuple[float, float, float] | None
+    quality: tuple[int, float, float]
+
+
+def _distance(a: tuple[float, float, float], b: tuple[float, float, float]) -> float:
+    return float(
+        np.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2)
+    )
+
+
 class PerceptionPipeline:
     """RGB-D perception pipeline with explicit uncertainty and safe fallbacks."""
 
@@ -103,12 +118,21 @@ class PerceptionPipeline:
         pose_max_depth_m: float = 0.0,
         pose_depth_band_m: float = 0.0,
         depth_scale_m: float = 0.001,
+        support_preferences: Mapping[str, str] | None = None,
+        support_radius_m: float = 0.0,
     ):
         self.segmenter = segmenter or NoopSegmenter()
         self.min_depth_points = int(min_depth_points)
         self.pose_max_depth_m = float(pose_max_depth_m)
         self.pose_depth_band_m = float(pose_depth_band_m)
         self.depth_scale_m = float(depth_scale_m)
+        # Map of object -> support object (e.g. coffee_capsule -> plate). When the
+        # support object is detected, the instance of the target object nearest to
+        # the support centroid is preferred over the most-confident one.
+        self.support_preferences = {
+            str(key): str(value) for key, value in (support_preferences or {}).items()
+        }
+        self.support_radius_m = float(support_radius_m)
 
     def run(
         self,
@@ -125,12 +149,12 @@ class PerceptionPipeline:
 
         mapper = RegistryMapper.from_registry(registry)
         detections = list(self.segmenter.detect(rgb))
-        facts: dict[str, Any] = {}
         warnings: list[str] = []
         seen_by_name: dict[str, int] = {}
-        # Per object, keep the best candidate (valid pose first, then higher
-        # confidence/score) instead of letting the last detection overwrite it.
-        best_quality: dict[str, tuple[int, float, float]] = {}
+        # Collect every canonicalized detection as a candidate so we can resolve
+        # which instance to expose per object (most-confident, or the instance
+        # nearest a support object when a spatial preference is configured).
+        candidates: dict[str, list[_Candidate]] = {}
 
         for detection in detections:
             canonical_name = mapper.canonicalize(detection.label)
@@ -180,13 +204,12 @@ class PerceptionPipeline:
                     object_warnings.append("orientation_estimated_pca")
 
             has_pose = translation is not None and quaternion is not None
-            quality = (1 if has_pose else 0, confidence, float(detection.score))
-            prev = best_quality.get(canonical_name)
-            if prev is not None and quality <= prev:
-                continue
-
-            best_quality[canonical_name] = quality
-            facts[canonical_name] = build_object_pose_fact(
+            centroid = (
+                (float(translation["x"]), float(translation["y"]), float(translation["z"]))
+                if has_pose
+                else None
+            )
+            fact = build_object_pose_fact(
                 name=canonical_name,
                 present=True,
                 frame_id=frame_id,
@@ -200,6 +223,12 @@ class PerceptionPipeline:
                 inlier_ratio=inlier_ratio,
                 warnings=object_warnings,
             )
+            quality = (1 if has_pose else 0, confidence, float(detection.score))
+            candidates.setdefault(canonical_name, []).append(
+                _Candidate(fact=fact, centroid=centroid, quality=quality)
+            )
+
+        facts = self._resolve_candidates(candidates, warnings)
 
         # Flag objects with multiple detected instances on the retained fact.
         for canonical_name, count in seen_by_name.items():
@@ -213,3 +242,51 @@ class PerceptionPipeline:
             warnings.append(segmenter_warning or "segmenter_no_detections")
 
         return PipelineResult(facts=facts, warnings=warnings, detections_seen=len(detections))
+
+    def _resolve_candidates(
+        self,
+        candidates: dict[str, list["_Candidate"]],
+        warnings: list[str],
+    ) -> dict[str, Any]:
+        """Select one fact per object, applying spatial support preferences."""
+        # Preliminary pick: most-confident candidate (valid pose first).
+        chosen: dict[str, _Candidate] = {}
+        for name, items in candidates.items():
+            chosen[name] = max(items, key=lambda candidate: candidate.quality)
+
+        support_centroids = {
+            name: candidate.centroid
+            for name, candidate in chosen.items()
+            if candidate.centroid is not None
+        }
+
+        for name, support_name in self.support_preferences.items():
+            items = candidates.get(name)
+            if not items:
+                continue
+            support_centroid = support_centroids.get(support_name)
+            if support_centroid is None:
+                chosen[name].fact.setdefault("warnings", []).append(
+                    f"support_unavailable:{support_name}"
+                )
+                continue
+            located = [c for c in items if c.centroid is not None]
+            if not located:
+                continue
+            scored = sorted(
+                located,
+                key=lambda c: _distance(c.centroid, support_centroid),
+            )
+            nearest = scored[0]
+            nearest_distance = _distance(nearest.centroid, support_centroid)
+            if self.support_radius_m > 0.0 and nearest_distance > self.support_radius_m:
+                chosen[name].fact.setdefault("warnings", []).append(
+                    f"no_instance_near_support:{support_name}"
+                )
+                continue
+            nearest.fact.setdefault("warnings", []).append(
+                f"selected_near_support:{support_name}"
+            )
+            chosen[name] = nearest
+
+        return {name: candidate.fact for name, candidate in chosen.items()}
