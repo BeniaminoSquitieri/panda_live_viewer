@@ -67,16 +67,15 @@ class PerceptionNode(Node):
         super().__init__("panda_perception_scene_facts")
         self.callback_group = ReentrantCallbackGroup()
         self.lock = threading.Lock()
-        self.cameras = {
-            "front": _CameraCache(frame_id="front"),
-            "wrist": _CameraCache(frame_id="wrist"),
-        }
         self.latest_scene_facts: dict[str, Any] | None = None
         self.tf_buffer = None
         self.tf_listener = None
 
         self._declare_parameters()
         self._load_parameters()
+        self.cameras = {
+            name: _CameraCache(frame_id=name) for name in self.enabled_cameras
+        }
         self.pipeline = PerceptionPipeline(
             segmenter=build_segmenter(self.segmenter_config, self.registry),
             min_depth_points=self.min_depth_points,
@@ -109,6 +108,7 @@ class PerceptionNode(Node):
         self.declare_parameter("min_depth_points", 25)
         self.declare_parameter("perception_log_path", "")
         self.declare_parameter("require_query_pose_service", True)
+        self.declare_parameter("enabled_cameras", ["front", "wrist"])
 
     def _load_parameters(self) -> None:
         self.image_topics = {
@@ -139,6 +139,11 @@ class PerceptionNode(Node):
         self.min_depth_points = int(self.get_parameter("min_depth_points").value)
         self.perception_log_path = str(self.get_parameter("perception_log_path").value)
         self.require_query_pose_service = bool(self.get_parameter("require_query_pose_service").value)
+        requested = [str(name).strip() for name in (self.get_parameter("enabled_cameras").value or [])]
+        valid = [name for name in ("front", "wrist") if name in requested]
+        self.enabled_cameras = valid or ["front", "wrist"]
+        if self.enabled_cameras != ["front", "wrist"]:
+            self.get_logger().info(f"Perception restricted to cameras: {self.enabled_cameras}")
 
     def _init_tf(self) -> None:
         try:
@@ -171,7 +176,7 @@ class PerceptionNode(Node):
 
     def _init_ros_interfaces(self) -> None:
         self.camera_subscriptions = []
-        for camera_name in ("front", "wrist"):
+        for camera_name in self.enabled_cameras:
             self.camera_subscriptions.append(
                 self.create_subscription(
                     CompressedImage,
@@ -444,11 +449,11 @@ class PerceptionNode(Node):
             for name, cache in snapshot.items()
         }
         scene_facts = build_scene_facts_stub(
-            front_available=snapshot["front"].rgb is not None,
-            wrist_available=snapshot["wrist"].rgb is not None,
+            front_available="front" in snapshot and snapshot["front"].rgb is not None,
+            wrist_available="wrist" in snapshot and snapshot["wrist"].rgb is not None,
             timestamps={
-                "front": snapshot["front"].rgb_stamp,
-                "wrist": snapshot["wrist"].rgb_stamp,
+                "front": snapshot["front"].rgb_stamp if "front" in snapshot else None,
+                "wrist": snapshot["wrist"].rgb_stamp if "wrist" in snapshot else None,
             },
             camera_details=camera_details,
             facts=facts,
