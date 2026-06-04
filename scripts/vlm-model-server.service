@@ -23,7 +23,7 @@ Environment=PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 ExecStart=/home/bsquitieri-iit.local/miniforge3/envs/ros2_jazzy/bin/python3 -u -m vlm_live.model_server \
     --model-path /home/bsquitieri-iit.local/models/Qwen3-VL-32B-Instruct \
-    --socket-path /tmp/vlm_server.sock
+    --socket-path /home/bsquitieri-iit.local/panda_live_viewer/runtime/vlm_server.sock
 
 # Restart automatically if the process crashes (not on clean exit/kill)
 Restart=on-failure

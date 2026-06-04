@@ -11,6 +11,7 @@ import numpy as np
 import rclpy
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CompressedImage
 from std_msgs.msg import String
 
@@ -221,14 +222,14 @@ class VlmNode(Node):
             CompressedImage,
             self.front_topic,
             lambda msg: self._on_image(msg, "front"),
-            10,
+            qos_profile_sensor_data,
             callback_group=self.callback_group,
         )
         self.wrist_sub = self.create_subscription(
             CompressedImage,
             self.wrist_topic,
             lambda msg: self._on_image(msg, "wrist"),
-            10,
+            qos_profile_sensor_data,
             callback_group=self.callback_group,
         )
         self.request_sub = self.create_subscription(

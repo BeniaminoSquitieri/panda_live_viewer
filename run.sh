@@ -12,11 +12,11 @@ LEROBOT_SETUP="/home/bsquitieri-iit.local/lerobot/install/setup.bash"
 #   MODEL_PATH=/path/to/small-model ./run.sh
 MODEL_PATH="${MODEL_PATH:-/home/bsquitieri-iit.local/models/Qwen3-VL-32B-Instruct}"
 
-# Runtime state (pid/log) kept in a stable, inspectable dir inside the project
-# instead of only /tmp. Socket stays in /tmp (AF_UNIX path length limits).
+# Runtime state (pid/log/socket) is kept in a stable, inspectable dir inside
+# the project instead of only /tmp.
 RUNTIME_DIR="${RUNTIME_DIR:-$SCRIPT_DIR/runtime}"
 mkdir -p "$RUNTIME_DIR"
-SOCKET_PATH="/tmp/vlm_server.sock"
+SOCKET_PATH="${SOCKET_PATH:-$RUNTIME_DIR/vlm_server.sock}"
 PID_FILE="$RUNTIME_DIR/vlm_server.pid"
 SERVER_LOG="$RUNTIME_DIR/vlm_server.log"
 META_FILE="$RUNTIME_DIR/vlm_server.json"

@@ -5,7 +5,7 @@ multiple ROS node restarts:
 
     python3 -m vlm_live.model_server --model-path /path/to/model
 
-The server listens on a Unix socket (default: /tmp/vlm_server.sock).
+The server listens on a Unix socket (default: ./runtime/vlm_server.sock).
 No network port is opened.
 
 Protocol: newline-delimited JSON over the socket.
@@ -30,7 +30,8 @@ import numpy as np
 logging.basicConfig(level=logging.INFO, format="[model_server] %(levelname)s %(message)s")
 log = logging.getLogger("model_server")
 
-DEFAULT_SOCKET_PATH = "/tmp/vlm_server.sock"
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DEFAULT_SOCKET_PATH = os.path.join(PROJECT_ROOT, "runtime", "vlm_server.sock")
 
 # Populated at startup
 _processor = None
@@ -163,8 +164,6 @@ def main():
         server.serve_forever()
     finally:
         server.server_close()
-        if os.path.exists(args.socket_path):
-            os.unlink(args.socket_path)
         sys.exit(0)
 
 

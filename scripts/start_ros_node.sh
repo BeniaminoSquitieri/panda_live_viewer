@@ -5,7 +5,8 @@
 set -eo pipefail
 
 LEROBOT_SETUP="/home/bsquitieri-iit.local/lerobot/install/setup.bash"
-SOCKET_PATH="/tmp/vlm_server.sock"
+PROJECT_DIR="$(dirname "$(dirname "${BASH_SOURCE[0]}")")"
+SOCKET_PATH="${SOCKET_PATH:-$PROJECT_DIR/runtime/vlm_server.sock}"
 VERIFIER_LOG="/home/bsquitieri/lerobot/generated_bt/experiments/verifier_events.jsonl"
 
 # shellcheck disable=SC1090
@@ -28,7 +29,7 @@ if [ ! -S "$SOCKET_PATH" ]; then
     exit 1
 fi
 
-cd "$(dirname "$(dirname "${BASH_SOURCE[0]}")")" 
+cd "$PROJECT_DIR"
 
 exec python3 -u -m vlm_live.cli \
     --ros-args \

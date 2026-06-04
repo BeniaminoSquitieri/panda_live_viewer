@@ -13,7 +13,8 @@ from typing import Tuple
 
 import numpy as np
 
-DEFAULT_SOCKET_PATH = "/tmp/vlm_server.sock"
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DEFAULT_SOCKET_PATH = os.path.join(PROJECT_ROOT, "runtime", "vlm_server.sock")
 
 
 def _encode_image_b64(scene: np.ndarray) -> str:

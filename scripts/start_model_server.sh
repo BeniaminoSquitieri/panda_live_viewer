@@ -11,7 +11,7 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 LEROBOT_SETUP="/home/bsquitieri-iit.local/lerobot/install/setup.bash"
 MODEL_PATH="/home/bsquitieri-iit.local/models/Qwen3-VL-32B-Instruct"
-SOCKET_PATH="/tmp/vlm_server.sock"
+SOCKET_PATH="${SOCKET_PATH:-$PROJECT_DIR/runtime/vlm_server.sock}"
 
 # shellcheck disable=SC1090
 source "$LEROBOT_SETUP"

@@ -11,7 +11,7 @@ cd ~/panda_live_viewer
 `run.sh` fa tutto in un solo comando:
 
 1. **Prima esecuzione / dopo un riavvio del PC**: avvia il model server in background, carica il modello configurato in `MODEL_PATH`, poi parte il nodo ROS.
-2. **Esecuzioni successive** (server già in esecuzione): rileva il socket `/tmp/vlm_server.sock` e parte il nodo ROS immediatamente, senza ricaricare il modello.
+2. **Esecuzioni successive** (server già in esecuzione): rileva il socket `runtime/vlm_server.sock` e parte il nodo ROS immediatamente, senza ricaricare il modello.
 
 Premere `Ctrl+C` ferma solo il nodo ROS — il modello rimane caricato in GPU.  
 Lo stato persistente del server è in `runtime/`:
@@ -19,6 +19,10 @@ Lo stato persistente del server è in `runtime/`:
 - `runtime/vlm_server.pid`
 - `runtime/vlm_server.log`
 - `runtime/vlm_server.json`
+- `runtime/vlm_server.sock`
+
+Il socket non vive più in `/tmp`: sta nel runtime del repo, così non dipende da
+cleanup esterni e rimane coerente con il resto degli artefatti del server.
 
 Per monitorare server, nodo e GPU:
 

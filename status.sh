@@ -9,7 +9,7 @@ set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNTIME_DIR="${RUNTIME_DIR:-$SCRIPT_DIR/runtime}"
-SOCKET_PATH="/tmp/vlm_server.sock"
+SOCKET_PATH="${SOCKET_PATH:-$RUNTIME_DIR/vlm_server.sock}"
 PID_FILE="$RUNTIME_DIR/vlm_server.pid"
 SERVER_LOG="$RUNTIME_DIR/vlm_server.log"
 META_FILE="$RUNTIME_DIR/vlm_server.json"
