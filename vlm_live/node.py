@@ -422,6 +422,11 @@ class VlmNode(Node):
                 error_message=error_message,
             )
             append_verifier_event(log_path, event)
+        except PermissionError as exc:
+            self.verifier_experiment_log_path = ""
+            self.get_logger().warning(
+                f"Disabling verifier experiment logging; path not writable: {log_path} ({exc})"
+            )
         except Exception:
             # Logging must never break the verification loop.
             self.get_logger().error(

@@ -1,6 +1,10 @@
 """Model loading and VLM inference helpers."""
 
+import gc
+import os
 from typing import Tuple
+
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 import torch
 from qwen_vl_utils import process_vision_info
@@ -20,6 +24,19 @@ def load_model(model_path: str):
     )
     model.eval()
     return processor, model, next(model.parameters()).device
+
+
+def _is_cuda_oom(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return "cuda out of memory" in text or "out of memory" in text
+
+
+def _cleanup_cuda_memory() -> None:
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        if hasattr(torch.cuda, "ipc_collect"):
+            torch.cuda.ipc_collect()
 
 
 def run_text_inference(scene, prompt: str, processor, model, device, tokens: int, log_out: bool, logger) -> str:
@@ -51,12 +68,43 @@ def run_text_inference(scene, prompt: str, processor, model, device, tokens: int
         )
         inputs = inputs.to(device)
 
-        with torch.inference_mode():
-            generated_ids = model.generate(
-                **inputs,
-                do_sample=False,
-                max_new_tokens=tokens,
-            )
+        generated_ids = None
+        generated_ids_trimmed = None
+        output_text = ""
+        retry_tokens = min(tokens, 256)
+        token_attempts = [tokens] if retry_tokens == tokens else [tokens, retry_tokens]
+        last_exc = None
+        for attempt_index, attempt_tokens in enumerate(token_attempts, start=1):
+            try:
+                with torch.inference_mode():
+                    generated_ids = model.generate(
+                        **inputs,
+                        do_sample=False,
+                        max_new_tokens=attempt_tokens,
+                    )
+                break
+            except RuntimeError as exc:
+                if not _is_cuda_oom(exc):
+                    raise
+                last_exc = exc
+                if attempt_index >= len(token_attempts):
+                    raise
+                logger.warning(
+                    f"CUDA OOM during VLM generation with max_new_tokens={attempt_tokens}; "
+                    f"clearing cache and retrying with max_new_tokens={token_attempts[attempt_index]}."
+                )
+                del inputs
+                _cleanup_cuda_memory()
+                inputs = processor(
+                    text=[text],
+                    images=image_inputs,
+                    videos=video_inputs,
+                    padding=True,
+                    return_tensors="pt",
+                )
+                inputs = inputs.to(device)
+        if generated_ids is None and last_exc is not None:
+            raise last_exc
 
         generated_ids_trimmed = [
             out_ids[len(in_ids):]
@@ -78,6 +126,10 @@ def run_text_inference(scene, prompt: str, processor, model, device, tokens: int
 
         return output_text
     finally:
+        for name in ("generated_ids_trimmed", "generated_ids", "inputs", "image_inputs", "video_inputs"):
+            if name in locals():
+                del locals()[name]
+        _cleanup_cuda_memory()
         cleanup(scene_path)
 
 
