@@ -10,11 +10,28 @@ cd ~/panda_live_viewer
 
 `run.sh` fa tutto in un solo comando:
 
-1. **Prima esecuzione / dopo un riavvio del PC**: avvia il model server in background (`nohup`), carica Qwen3-VL-32B su GPU (~30 s), poi parte il nodo ROS.
+1. **Prima esecuzione / dopo un riavvio del PC**: avvia il model server in background, carica il modello configurato in `MODEL_PATH`, poi parte il nodo ROS.
 2. **Esecuzioni successive** (server già in esecuzione): rileva il socket `/tmp/vlm_server.sock` e parte il nodo ROS immediatamente, senza ricaricare il modello.
 
 Premere `Ctrl+C` ferma solo il nodo ROS — il modello rimane caricato in GPU.  
-Il log del server è in `/tmp/vlm_server.log`.
+Lo stato persistente del server è in `runtime/`:
+
+- `runtime/vlm_server.pid`
+- `runtime/vlm_server.log`
+- `runtime/vlm_server.json`
+
+Per monitorare server, nodo e GPU:
+
+```bash
+cd ~/panda_live_viewer
+./status.sh
+```
+
+Per testare un modello più piccolo:
+
+```bash
+MODEL_PATH=~/models/Qwen3-VL-4B-Instruct MIN_FREE_MIB=9000 ./run.sh
+```
 
 > **Prerequisito**: `~/lerobot/install/setup.bash` deve esistere.
 > Vedi la sezione [lerobot ROS workspace](#lerobot-ros-workspace-interfaces-only) se non è ancora costruito.

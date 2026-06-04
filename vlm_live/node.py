@@ -458,6 +458,20 @@ class VlmNode(Node):
         front, wrist = self._get_frames()
         return compose(front, wrist)
 
+    def _wait_for_scene(self, timeout_s: float = 10.0) -> Optional[np.ndarray]:
+        """Poll for a composed scene until both camera frames are available.
+
+        Cameras publish continuously, but a plan request can arrive within
+        milliseconds of node startup, before the first frame is decoded.
+        Wait briefly instead of failing immediately.
+        """
+        deadline = time.monotonic() + timeout_s
+        scene = self._compose_scene()
+        while scene is None and time.monotonic() < deadline:
+            time.sleep(0.1)
+            scene = self._compose_scene()
+        return scene
+
     def _run_vlm(self, request: dict):
         scene = self._compose_scene()
         if scene is None:
@@ -494,7 +508,7 @@ class VlmNode(Node):
             )
 
     def _run_planner_vlm(self, prompt: str) -> str:
-        scene = self._compose_scene()
+        scene = self._wait_for_scene(timeout_s=10.0)
         if scene is None:
             raise RuntimeError("Waiting for camera streams before planning.")
 
