@@ -95,8 +95,19 @@ def back_project_mask(
     mask: np.ndarray,
     intrinsics: CameraIntrinsics,
     max_points: int = 4096,
+    max_depth_m: float = 0.0,
+    depth_band_m: float = 0.0,
 ) -> np.ndarray:
-    """Back-project valid masked depth pixels into camera-frame XYZ points."""
+    """Back-project valid masked depth pixels into camera-frame XYZ points.
+
+    Optional depth gating removes background contamination before pose fitting:
+    - ``max_depth_m`` (>0): drop pixels farther than this absolute range. For
+      tabletop manipulation this discards far walls/floor captured by a loose
+      segmentation mask.
+    - ``depth_band_m`` (>0): keep only the nearest cluster, i.e. pixels whose
+      depth is within ``depth_band_m`` of a robust near-depth estimate (10th
+      percentile). This isolates the foreground object from residual background.
+    """
     if depth.shape != mask.shape:
         raise ValueError(f"Depth shape {depth.shape} must match mask shape {mask.shape}.")
     if depth.shape != (intrinsics.height, intrinsics.width):
@@ -111,12 +122,27 @@ def back_project_mask(
     if rows.size == 0:
         return np.empty((0, 3), dtype=np.float32)
 
+    z = depth_m[rows, cols]
+
+    if max_depth_m > 0.0:
+        keep = z <= max_depth_m
+        rows, cols, z = rows[keep], cols[keep], z[keep]
+        if rows.size == 0:
+            return np.empty((0, 3), dtype=np.float32)
+
+    if depth_band_m > 0.0:
+        near = float(np.percentile(z, 10.0))
+        keep = np.abs(z - near) <= depth_band_m
+        rows, cols, z = rows[keep], cols[keep], z[keep]
+        if rows.size == 0:
+            return np.empty((0, 3), dtype=np.float32)
+
     if rows.size > max_points:
         indices = np.linspace(0, rows.size - 1, num=max_points, dtype=np.int64)
         rows = rows[indices]
         cols = cols[indices]
+        z = z[indices]
 
-    z = depth_m[rows, cols]
     x = (cols.astype(np.float32) - intrinsics.cx) * z / intrinsics.fx
     y = (rows.astype(np.float32) - intrinsics.cy) * z / intrinsics.fy
     return np.stack([x, y, z], axis=1).astype(np.float32)

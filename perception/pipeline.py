@@ -95,9 +95,18 @@ class PipelineResult:
 class PerceptionPipeline:
     """RGB-D perception pipeline with explicit uncertainty and safe fallbacks."""
 
-    def __init__(self, segmenter: Segmenter | None = None, min_depth_points: int = 25):
+    def __init__(
+        self,
+        segmenter: Segmenter | None = None,
+        min_depth_points: int = 25,
+        *,
+        pose_max_depth_m: float = 0.0,
+        pose_depth_band_m: float = 0.0,
+    ):
         self.segmenter = segmenter or NoopSegmenter()
         self.min_depth_points = int(min_depth_points)
+        self.pose_max_depth_m = float(pose_max_depth_m)
+        self.pose_depth_band_m = float(pose_depth_band_m)
 
     def run(
         self,
@@ -143,7 +152,13 @@ class PerceptionPipeline:
                 continue
 
             try:
-                points = back_project_mask(depth=depth, mask=detection.mask, intrinsics=intrinsics)
+                points = back_project_mask(
+                    depth=depth,
+                    mask=detection.mask,
+                    intrinsics=intrinsics,
+                    max_depth_m=self.pose_max_depth_m,
+                    depth_band_m=self.pose_depth_band_m,
+                )
             except ValueError as exc:
                 object_warnings.append(f"back_projection_error:{exc}")
                 facts[canonical_name] = build_object_pose_fact(

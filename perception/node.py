@@ -79,6 +79,8 @@ class PerceptionNode(Node):
         self.pipeline = PerceptionPipeline(
             segmenter=build_segmenter(self.segmenter_config, self.registry),
             min_depth_points=self.min_depth_points,
+            pose_max_depth_m=self.pose_max_depth_m,
+            pose_depth_band_m=self.pose_depth_band_m,
         )
         self._init_tf()
         self._init_ros_interfaces()
@@ -109,6 +111,8 @@ class PerceptionNode(Node):
         self.declare_parameter("perception_log_path", "")
         self.declare_parameter("require_query_pose_service", True)
         self.declare_parameter("enabled_cameras", ["front", "wrist"])
+        self.declare_parameter("pose_max_depth_m", 0.0)
+        self.declare_parameter("pose_depth_band_m", 0.0)
 
     def _load_parameters(self) -> None:
         self.image_topics = {
@@ -144,6 +148,8 @@ class PerceptionNode(Node):
         self.enabled_cameras = valid or ["front", "wrist"]
         if self.enabled_cameras != ["front", "wrist"]:
             self.get_logger().info(f"Perception restricted to cameras: {self.enabled_cameras}")
+        self.pose_max_depth_m = float(self.get_parameter("pose_max_depth_m").value)
+        self.pose_depth_band_m = float(self.get_parameter("pose_depth_band_m").value)
 
     def _init_tf(self) -> None:
         try:
