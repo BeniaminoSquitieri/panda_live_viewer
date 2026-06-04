@@ -170,9 +170,9 @@ class PerceptionNode(Node):
         return payload
 
     def _init_ros_interfaces(self) -> None:
-        self.subscriptions = []
+        self.camera_subscriptions = []
         for camera_name in ("front", "wrist"):
-            self.subscriptions.append(
+            self.camera_subscriptions.append(
                 self.create_subscription(
                     CompressedImage,
                     self.image_topics[camera_name],
@@ -181,7 +181,7 @@ class PerceptionNode(Node):
                     callback_group=self.callback_group,
                 )
             )
-            self.subscriptions.append(
+            self.camera_subscriptions.append(
                 self.create_subscription(
                     Image,
                     self.depth_topics[camera_name],
@@ -190,7 +190,7 @@ class PerceptionNode(Node):
                     callback_group=self.callback_group,
                 )
             )
-            self.subscriptions.append(
+            self.camera_subscriptions.append(
                 self.create_subscription(
                     CameraInfo,
                     self.camera_info_topics[camera_name],
