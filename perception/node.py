@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 from dataclasses import dataclass
@@ -149,11 +150,21 @@ class PerceptionNode(Node):
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
     @staticmethod
-    def _load_registry(raw_json: str) -> dict[str, Any]:
-        raw_json = (raw_json or "").strip()
-        if not raw_json:
+    def _load_registry(raw_value: str) -> dict[str, Any]:
+        raw_value = (raw_value or "").strip()
+        if not raw_value:
             return {}
-        payload = json.loads(raw_json)
+        # Accept either a path to a JSON file or an inline JSON object string.
+        if not raw_value.startswith(("{", "[")):
+            registry_path = os.path.expanduser(raw_value)
+            if os.path.isfile(registry_path):
+                with open(registry_path, "r", encoding="utf-8") as handle:
+                    raw_value = handle.read().strip()
+            else:
+                raise FileNotFoundError(
+                    f"planner_registry_json '{registry_path}' is not a file and is not inline JSON."
+                )
+        payload = json.loads(raw_value)
         if not isinstance(payload, dict):
             raise ValueError("planner_registry_json must be a JSON object.")
         return payload

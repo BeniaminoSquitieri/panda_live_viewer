@@ -1,0 +1,20 @@
+{
+  "objects": [
+    {
+      "canonical_name": "coffee_capsule",
+      "aliases": ["coffee capsule", "espresso capsule", "coffee pod", "capsule"]
+    },
+    {
+      "canonical_name": "cup",
+      "aliases": ["coffee cup", "mug", "empty cup"]
+    },
+    {
+      "canonical_name": "coffee_machine",
+      "aliases": ["coffee machine", "espresso machine"]
+    },
+    {
+      "canonical_name": "plate",
+      "aliases": ["white plate", "dish"]
+    }
+  ]
+}
