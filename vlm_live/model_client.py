@@ -8,6 +8,7 @@ socket to a persistent server process. No network port is opened.
 import base64
 import io
 import json
+import os
 import socket
 from typing import Tuple
 
