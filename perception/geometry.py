@@ -45,7 +45,10 @@ def stamp_to_float(stamp: Any) -> float | None:
 
 def camera_info_to_intrinsics(msg: Any) -> CameraIntrinsics:
     """Convert sensor_msgs/CameraInfo-like data into intrinsics."""
-    k = list(getattr(msg, "k", []) or getattr(msg, "K", []))
+    raw_k = getattr(msg, "k", None)
+    if raw_k is None or len(raw_k) == 0:
+        raw_k = getattr(msg, "K", None)
+    k = list(raw_k) if raw_k is not None else []
     if len(k) != 9:
         raise ValueError("CameraInfo.k must contain 9 values.")
     return CameraIntrinsics(
