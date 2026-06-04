@@ -23,6 +23,7 @@ from .const import (
     GENERATE_PLAN_SERVICE,
     MAX_NEW_TOKENS,
     MODEL_PATH,
+    MODEL_SERVER_URL,
     PLANNER_MAX_NEW_TOKENS,
     SCENE_FACTS_TOPIC,
     STATUS_FAILURE,
@@ -72,6 +73,7 @@ class NodeConfig:
     require_generate_plan_service: bool
     scene_facts_topic: str
     verifier_experiment_log_path: str
+    model_server_url: str
 
 
 class VlmNode(Node):
@@ -103,11 +105,13 @@ class VlmNode(Node):
         self.require_generate_plan_service = cfg.require_generate_plan_service
         self.scene_facts_topic = cfg.scene_facts_topic
         self.verifier_experiment_log_path = cfg.verifier_experiment_log_path
+        self.model_server_url = cfg.model_server_url
 
         self._init_state()
         self._init_ros_interfaces()
         # Dry-run planning relies on this guard to avoid loading Qwen/GPU at startup.
-        if not self.lazy_load_model:
+        # When model_server_url is set the model lives in a separate process.
+        if not self.lazy_load_model and not self.model_server_url:
             self._ensure_vlm_loaded()
         self._start_worker()
 
@@ -138,13 +142,17 @@ class VlmNode(Node):
         self.declare_parameter("planner_dry_run", False)
         self.declare_parameter("planner_max_new_tokens", PLANNER_MAX_NEW_TOKENS)
         # Robot-day dry-run should keep this true; eager loading is only for live VLM warm-up.
-        self.declare_parameter("lazy_load_model", True)
+        self.declare_parameter("lazy_load_model", False)
         # Fail fast when lerobot's GenerateTaskPlan interface was not sourced.
         self.declare_parameter("require_generate_plan_service", True)
         self.declare_parameter("scene_facts_topic", SCENE_FACTS_TOPIC)
         # Optional append-only JSONL log of verifier events (provenance only).
         # Empty string disables logging and never changes published payloads.
         self.declare_parameter("verifier_experiment_log_path", "")
+        # When non-empty, inference is forwarded to a persistent model_server
+        # instead of loading the model in this process.  Example:
+        #   -p model_server_url:=http://127.0.0.1:8765
+        self.declare_parameter("model_server_url", MODEL_SERVER_URL)
 
     def _load_config(self) -> NodeConfig:
         """Read and normalize parameter values into an immutable config object."""
@@ -176,6 +184,7 @@ class VlmNode(Node):
             verifier_experiment_log_path=str(
                 self.get_parameter("verifier_experiment_log_path").value
             ),
+            model_server_url=str(self.get_parameter("model_server_url").value).strip(),
         )
 
     def _init_state(self) -> None:
@@ -455,6 +464,20 @@ class VlmNode(Node):
             return STATUS_RUNNING, "Waiting for both camera streams."
 
         prompt = build_prompt(request, self.reasoning)
+
+        if self.model_server_url:
+            from .model_client import run_inference_via_server
+
+            return run_inference_via_server(
+                server_url=self.model_server_url,
+                scene=scene,
+                prompt=prompt,
+                tokens=self.max_tokens,
+                reasoning=self.reasoning,
+                log_out=self.log_out,
+                logger=self.get_logger(),
+            )
+
         with self.inference_lock:
             self._ensure_vlm_loaded()
             run_inference_fn = self._run_inference_fn()
@@ -474,6 +497,18 @@ class VlmNode(Node):
         scene = self._compose_scene()
         if scene is None:
             raise RuntimeError("Waiting for camera streams before planning.")
+
+        if self.model_server_url:
+            from .model_client import run_text_inference_via_server
+
+            return run_text_inference_via_server(
+                server_url=self.model_server_url,
+                scene=scene,
+                prompt=prompt,
+                tokens=self.planner_max_tokens,
+                log_out=self.log_out,
+                logger=self.get_logger(),
+            )
 
         with self.inference_lock:
             self._ensure_vlm_loaded()

@@ -1,0 +1,40 @@
+[Unit]
+Description=Persistent VLM Model Server (Qwen3-VL-32B)
+Documentation=https://github.com/BeniaminoSquitieri/panda_live_viewer
+After=network.target
+
+[Service]
+Type=simple
+User=bsquitieri
+WorkingDirectory=/home/bsquitieri-iit.local/panda_live_viewer
+
+# ROS + lerobot environment variables (captured from sourcing lerobot/install/setup.bash)
+Environment=ROS_DISTRO=jazzy
+Environment=ROS_VERSION=2
+Environment=ROS_PYTHON_VERSION=3
+Environment=ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET
+Environment=AMENT_PREFIX_PATH=/home/bsquitieri-iit.local/lerobot/install/lerobot_bt_interfaces:/home/bsquitieri-iit.local/miniforge3/envs/ros2_jazzy
+Environment=COLCON_PREFIX_PATH=/home/bsquitieri-iit.local/lerobot/install
+Environment=CMAKE_PREFIX_PATH=/home/bsquitieri-iit.local/lerobot/install/lerobot_bt_interfaces
+Environment=LD_LIBRARY_PATH=/home/bsquitieri-iit.local/lerobot/install/lerobot_bt_interfaces/lib:/home/bsquitieri-iit.local/miniforge3/envs/ros2_jazzy/lib
+Environment=PYTHONPATH=/home/bsquitieri-iit.local/lerobot/install/lerobot_bt_interfaces/lib/python3.12/site-packages:/home/bsquitieri-iit.local/miniforge3/envs/ros2_jazzy/lib/python/site-packages:/home/bsquitieri-iit.local/miniforge3/envs/ros2_jazzy/lib/python3.12/site-packages
+Environment=PATH=/home/bsquitieri-iit.local/miniforge3/envs/ros2_jazzy/bin:/home/bsquitieri-iit.local/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
+ExecStart=/home/bsquitieri-iit.local/miniforge3/envs/ros2_jazzy/bin/python3 -u -m vlm_live.model_server \
+    --model-path /home/bsquitieri-iit.local/models/Qwen3-VL-32B-Instruct \
+    --socket-path /tmp/vlm_server.sock
+
+# Restart automatically if the process crashes (not on clean exit/kill)
+Restart=on-failure
+RestartSec=15
+
+# Allow enough time to load the 32B model into GPU
+TimeoutStartSec=120
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=vlm-model-server
+
+[Install]
+WantedBy=multi-user.target

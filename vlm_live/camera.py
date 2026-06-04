@@ -1,64 +1,64 @@
 """Image helpers for decoding, labeling, composing, and saving camera frames."""
 
+import io
 import tempfile
 from pathlib import Path
 from typing import Optional, Tuple
 
 import numpy as np
+from PIL import Image as _PILImage
 from sensor_msgs.msg import CompressedImage
 
+# Target resolution for each camera panel in the composed scene.
+_PANEL_W, _PANEL_H = 640, 480
 
-def _cv2():
-    try:
-        import cv2
-    except ModuleNotFoundError as exc:
-        raise RuntimeError("OpenCV (cv2) is required for camera image processing.") from exc
-    return cv2
+
+def _resize(frame: np.ndarray, w: int = _PANEL_W, h: int = _PANEL_H) -> np.ndarray:
+    img = _PILImage.fromarray(frame)
+    img = img.resize((w, h), _PILImage.BILINEAR)
+    return np.array(img)
 
 
 def decode_image(msg: CompressedImage) -> Optional[np.ndarray]:
-    """Decode a ROS compressed image message into a BGR OpenCV frame."""
-    cv2 = _cv2()
-    np_arr = np.frombuffer(msg.data, np.uint8)
-    return cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+    """Decode a ROS compressed image message into an RGB numpy array."""
+    try:
+        img = _PILImage.open(io.BytesIO(bytes(msg.data))).convert("RGB")
+        return np.array(img)
+    except Exception:
+        return None
 
 
-def placeholder(label: str, size: Tuple[int, int] = (640, 480)) -> np.ndarray:
+def placeholder(text: str, size: Tuple[int, int] = (_PANEL_W, _PANEL_H)) -> np.ndarray:
     """Create a black placeholder frame with a centered status label."""
-    cv2 = _cv2()
-    width, height = size
-    image = np.zeros((height, width, 3), dtype=np.uint8)
-    cv2.putText(
-        image,
-        label,
-        (40, height // 2),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        1.0,
-        (255, 255, 255),
-        2,
-    )
-    return image
+    from PIL import ImageDraw, ImageFont
+
+    w, h = size
+    img = _PILImage.new("RGB", (w, h), (0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    try:
+        font = ImageFont.load_default(size=24)
+    except TypeError:
+        font = ImageFont.load_default()
+    draw.text((40, h // 2), text, fill=(255, 255, 255), font=font)
+    return np.array(img)
 
 
 def label(frame: np.ndarray, title: str) -> np.ndarray:
     """Return a copy of the frame with a visible title overlay."""
-    cv2 = _cv2()
-    output = frame.copy()
-    cv2.putText(
-        output,
-        title,
-        (24, 42),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        1.0,
-        (0, 255, 255),
-        2,
-    )
-    return output
+    from PIL import ImageDraw, ImageFont
+
+    img = _PILImage.fromarray(frame).copy()
+    draw = ImageDraw.Draw(img)
+    try:
+        font = ImageFont.load_default(size=24)
+    except TypeError:
+        font = ImageFont.load_default()
+    draw.text((24, 12), title, fill=(0, 255, 255), font=font)
+    return np.array(img)
 
 
 def compose(front: Optional[np.ndarray], wrist: Optional[np.ndarray]) -> Optional[np.ndarray]:
     """Build a side-by-side scene from the front and wrist cameras."""
-    cv2 = _cv2()
     if front is None and wrist is None:
         return None
 
@@ -67,16 +67,16 @@ def compose(front: Optional[np.ndarray], wrist: Optional[np.ndarray]) -> Optiona
     if wrist is None:
         wrist = placeholder("Waiting for wrist camera...")
 
-    front = cv2.resize(front, (640, 480))
-    wrist = cv2.resize(wrist, (640, 480))
+    front = _resize(front)
+    wrist = _resize(wrist)
     return np.hstack([label(front, "Front camera"), label(wrist, "Wrist camera")])
 
 
 def save_image(scene: np.ndarray) -> str:
     """Persist a scene to a temporary PNG file and return the file path."""
-    cv2 = _cv2()
+    img = _PILImage.fromarray(scene)
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-        cv2.imwrite(tmp.name, scene)
+        img.save(tmp.name, format="PNG")
         return tmp.name
 
 

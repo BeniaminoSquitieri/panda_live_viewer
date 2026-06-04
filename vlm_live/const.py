@@ -38,3 +38,9 @@ VIEW_PORT = 8081
 VIEW_FPS = 10.0
 MAX_NEW_TOKENS = 64
 PLANNER_MAX_NEW_TOKENS = 512
+
+# When non-empty, inference is forwarded to a persistent model_server process
+# via Unix socket instead of loading the model in-process. No network port is
+# opened. Start the server once with:
+#   python3 -m vlm_live.model_server --model-path <path>
+MODEL_SERVER_URL = ""

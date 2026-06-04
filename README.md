@@ -1,6 +1,26 @@
 
 # Panda VLM Live Verifier & Planner (panda_live_viewer)
 
+## Quick Start
+
+```bash
+cd ~/panda_live_viewer
+./run.sh
+```
+
+`run.sh` fa tutto in un solo comando:
+
+1. **Prima esecuzione / dopo un riavvio del PC**: avvia il model server in background (`nohup`), carica Qwen3-VL-32B su GPU (~30 s), poi parte il nodo ROS.
+2. **Esecuzioni successive** (server già in esecuzione): rileva il socket `/tmp/vlm_server.sock` e parte il nodo ROS immediatamente, senza ricaricare il modello.
+
+Premere `Ctrl+C` ferma solo il nodo ROS — il modello rimane caricato in GPU.  
+Il log del server è in `/tmp/vlm_server.log`.
+
+> **Prerequisito**: `~/lerobot/install/setup.bash` deve esistere.
+> Vedi la sezione [lerobot ROS workspace](#lerobot-ros-workspace-interfaces-only) se non è ancora costruito.
+
+---
+
 ## Architecture & Roles
 
 **panda_live_viewer** (this repo):
