@@ -1,6 +1,7 @@
 """Pure request handling for the GenerateTaskPlan ROS service."""
 
 import json
+import traceback
 from dataclasses import dataclass
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
@@ -113,9 +114,10 @@ def build_generate_plan_response(
             prompt=prompt,
         )
     except Exception as exc:
+        tb = traceback.format_exc()
         return GeneratePlanResult(
             success=False,
             plan_json="",
-            error_message=str(exc),
+            error_message=f"{exc}\n---\n{tb}",
             prompt=prompt,
         )

@@ -558,11 +558,13 @@ class VlmNode(Node):
                 f"(dry_run={self.planner_dry_run})"
             )
         else:
-            self.get_logger().warning(
-                f"GenerateTaskPlan failed for task {request.task_name!r}: "
+            # result.error_message already contains the traceback from service_logic
+            self.get_logger().error(
+                f"GenerateTaskPlan failed for task {request.task_name!r}:\n"
                 f"{result.error_message}"
             )
         return response
+
 
     def _evaluation_loop(self) -> None:
         while rclpy.ok() and not self.stop.is_set():
