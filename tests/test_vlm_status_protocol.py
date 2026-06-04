@@ -1,7 +1,7 @@
 import unittest
 
 from vlm_live.const import STATUS_FAILURE, STATUS_RUNNING, STATUS_SUCCESS, STATUS_WAIT_HUMAN
-from vlm_live.prompt import build_prompt, extract_reason, fit_status, parse_status
+from vlm_live.prompt import build_prompt, extract_reason, fit_status, format_scene_context, parse_status
 from vlm_live.protocol import build_result_payload, clean_statuses
 
 
@@ -97,6 +97,58 @@ class VlmStatusProtocolTests(unittest.TestCase):
         self.assertIsNotNone(payload)
         self.assertEqual(payload["status"], STATUS_WAIT_HUMAN)
         self.assertEqual(payload["message"], "User must pour the ingredient.")
+
+
+class SceneContextEnrichmentTests(unittest.TestCase):
+    _FACTS = (
+        '{"facts": {"coffee_capsule": {"present": true, "frame_id": "base_link", '
+        '"pose": {"translation": {"x": 0.684, "y": -0.26, "z": 0.15}}, '
+        '"pose_confidence": 0.62}}}'
+    )
+
+    def test_format_scene_context_renders_present_pose(self):
+        context = format_scene_context(self._FACTS)
+
+        self.assertIn("coffee_capsule", context)
+        self.assertIn("0.684", context)
+        self.assertIn("base_link", context)
+        self.assertIn("confidence 0.62", context)
+
+    def test_format_scene_context_empty_for_blank_or_invalid(self):
+        self.assertEqual(format_scene_context(""), "")
+        self.assertEqual(format_scene_context("not-json"), "")
+        self.assertEqual(format_scene_context('{"facts": {}}'), "")
+
+    def test_format_scene_context_skips_absent_objects(self):
+        facts = '{"facts": {"cup": {"present": false, "frame_id": "base_link"}}}'
+        self.assertEqual(format_scene_context(facts), "")
+
+    def test_build_prompt_includes_scene_context_when_present(self):
+        context = format_scene_context(self._FACTS)
+        prompt = build_prompt(
+            {
+                "skill_name": "pick_and_insert_capsule",
+                "attempt_id": 1,
+                "message": "Check capsule inserted.",
+                "scene_context": context,
+            },
+            reasoning=False,
+        )
+
+        self.assertIn("Perception scene facts", prompt)
+        self.assertIn("coffee_capsule", prompt)
+
+    def test_build_prompt_unchanged_without_scene_context(self):
+        prompt = build_prompt(
+            {
+                "skill_name": "pick_and_insert_capsule",
+                "attempt_id": 1,
+                "message": "Check capsule inserted.",
+            },
+            reasoning=False,
+        )
+
+        self.assertNotIn("Perception scene facts", prompt)
 
 
 if __name__ == "__main__":

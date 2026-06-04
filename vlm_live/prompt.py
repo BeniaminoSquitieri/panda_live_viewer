@@ -1,5 +1,6 @@
 """Prompt construction and status normalization helpers."""
 
+import json
 import re
 from typing import Any, Dict, List
 
@@ -14,10 +15,61 @@ from .const import (
 
 STATUS_PATTERN = "|".join((STATUS_RUNNING, STATUS_SUCCESS, STATUS_FAILURE, STATUS_WAIT_HUMAN))
 
+
+def format_scene_context(scene_facts_json: str) -> str:
+    """Render perception scene facts as a concise, read-only prompt context.
+
+    One-way perception -> VLM enrichment: the VLM may *read* metric object poses
+    to ground its judgement, but it never produces coordinates. Returns an empty
+    string when there are no usable facts, so the prompt is unchanged (no
+    regression) whenever perception is absent.
+    """
+    raw = (scene_facts_json or "").strip()
+    if not raw:
+        return ""
+    try:
+        payload = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    facts = payload.get("facts")
+    if not isinstance(facts, dict) or not facts:
+        return ""
+
+    lines: List[str] = []
+    for name, fact in sorted(facts.items()):
+        if not isinstance(fact, dict) or not fact.get("present"):
+            continue
+        frame_id = str(fact.get("frame_id") or "camera")
+        pose = fact.get("pose")
+        if isinstance(pose, dict) and isinstance(pose.get("translation"), dict):
+            t = pose["translation"]
+            try:
+                coords = f"[{float(t['x']):.3f}, {float(t['y']):.3f}, {float(t['z']):.3f}] m"
+            except (KeyError, TypeError, ValueError):
+                coords = "(pose unavailable)"
+            confidence = fact.get("pose_confidence")
+            conf_text = ""
+            try:
+                if confidence is not None:
+                    conf_text = f", confidence {float(confidence):.2f}"
+            except (TypeError, ValueError):
+                conf_text = ""
+            lines.append(f"- {name}: {coords} in {frame_id}{conf_text}")
+        else:
+            lines.append(f"- {name}: present (no metric pose)")
+
+    if not lines:
+        return ""
+    return "\n".join(lines)
+
+
 def build_prompt(request: Dict[str, Any], reasoning: bool) -> str:
     """Build the textual instruction for the VLM."""
     message = request.get("message") or "No additional context."
     task_text = request.get("task") or ""
+    scene_context = (request.get("scene_context") or "").strip()
     allowed_statuses = _allowed_statuses_for_prompt(request)
     status_spec = "|".join(allowed_statuses)
     status_text = ", ".join(allowed_statuses)
@@ -27,6 +79,13 @@ def build_prompt(request: Dict[str, Any], reasoning: bool) -> str:
             "Choose WAIT_HUMAN when explicit human intervention, a human action, or a human decision is required.\n"
         )
     task_line = f"Task description: {task_text}\n" if task_text else ""
+    scene_context_block = ""
+    if scene_context:
+        scene_context_block = (
+            "Perception scene facts (metric object poses measured by the depth "
+            "pipeline; use only as spatial context, do not invent coordinates):\n"
+            f"{scene_context}\n"
+        )
     common_header = (
         "You are a robotic task verifier. Inspect the live camera scene and decide whether the requested condition is satisfied.\n"
         "The image shows two camera views side by side: the LEFT half is the fixed 'Front camera' and the RIGHT half is the moving 'Wrist camera' mounted on the gripper.\n"
@@ -36,6 +95,7 @@ def build_prompt(request: Dict[str, Any], reasoning: bool) -> str:
         f"Check name: {request['skill_name']}\n"
         f"Attempt id: {request['attempt_id']}\n"
         f"{task_line}"
+        f"{scene_context_block}"
         f"BT message: {message}\n"
     )
 

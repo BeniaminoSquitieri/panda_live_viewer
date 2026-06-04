@@ -225,6 +225,15 @@ The VLM planner node also subscribes to `/perception/scene_facts`. If a
 `/lerobot_bt/generate_plan` request omits `scene_facts_json`, the latest
 published scene facts are injected into the planner prompt.
 
+The VLM **verifier** prompt is additionally enriched, read-only, with the
+metric object poses from `/perception/scene_facts`: when present, objects are
+listed as e.g. `- coffee_capsule: [0.684, -0.260, 0.150] m in base_link,
+confidence 0.62` under a `Perception scene facts (...)` block. This is one-way
+perception → VLM: the VLM only *reads* poses to ground its judgement and never
+produces coordinates; perception stays the single source of truth. Without
+scene facts the prompt is unchanged (no regression). See
+`vlm_live/prompt.py::format_scene_context`.
+
 The default segmenter backend is OWL-ViT through `transformers`, loaded lazily
 from `segmenter_model_path` (`google/owlvit-base-patch32` by default). It uses
 the registry object names as zero-shot labels and converts detections into
@@ -292,6 +301,16 @@ ros2 run tf2_ros tf2_echo base_link panda_camera_wrist
 
 Expected: a steady transform (no "frame does not exist" errors). The perception
 node lifts poses into `base_link` using these transforms.
+
+> Camera extrinsic = single source of truth. The base→camera transform comes
+> **only** from `camera_static_tf_map` in the lerobot executor YAML (broadcast
+> by `camera_publisher`); perception just listens. If those transforms are
+> missing, perception returns camera-frame poses and the spatial-prior gate
+> ABSTAINs (`frame_mismatch`) — the correct, safe behaviour. To calibrate, run
+> `scripts/calibrate_camera_extrinsics.py --input corr.json` (rigid
+> Kabsch/Umeyama fit of camera↔base correspondences; prints a ready-to-paste
+> `camera_static_tf_map` block and the residual RMS). Do **not** hand-invent
+> extrinsic numbers.
 
 ### 5. Start the perception node
 

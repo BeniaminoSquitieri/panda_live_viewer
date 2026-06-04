@@ -40,7 +40,7 @@ from .const import (
 )
 from .camera import compose, decode_image
 from .experiment_log import append_verifier_event, build_verifier_event
-from .prompt import build_prompt, fit_status
+from .prompt import build_prompt, fit_status, format_scene_context
 from .protocol import build_result_payload, coerce_result_for_request, parse_request
 from .view import start_view
 
@@ -477,6 +477,10 @@ class VlmNode(Node):
         scene = self._compose_scene()
         if scene is None:
             return STATUS_RUNNING, "Waiting for both camera streams."
+
+        scene_context = format_scene_context(self._get_latest_scene_facts_json())
+        if scene_context and not request.get("scene_context"):
+            request = {**request, "scene_context": scene_context}
 
         prompt = build_prompt(request, self.reasoning)
 

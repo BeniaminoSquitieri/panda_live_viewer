@@ -25,13 +25,11 @@ VERIFIER_LOG="/home/bsquitieri/lerobot/generated_bt/experiments/verifier_events.
 # shellcheck disable=SC1090
 source "$LEROBOT_SETUP"
 
-# ROS middleware settings — honour whatever is already in the environment,
-# fall back to the values required by this project.
-export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-0}"
-export RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}"
-export CYCLONEDDS_URI="${CYCLONEDDS_URI:-file://$HOME/.ros/cyclonedds.xml}"
-# ROS_LOCALHOST_ONLY must be unset so the node can communicate over the network.
-unset ROS_LOCALHOST_ONLY
+# ROS middleware settings (CycloneDDS). Centralised in ros_env.sh so every entry
+# point uses the same values and you never have to export them by hand; it
+# honours anything already set in the environment.
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/ros_env.sh"
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
