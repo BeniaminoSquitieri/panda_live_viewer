@@ -128,6 +128,9 @@ class PerceptionPipeline:
         facts: dict[str, Any] = {}
         warnings: list[str] = []
         seen_by_name: dict[str, int] = {}
+        # Per object, keep the best candidate (valid pose first, then higher
+        # confidence/score) instead of letting the last detection overwrite it.
+        best_quality: dict[str, tuple[int, float, float]] = {}
 
         for detection in detections:
             canonical_name = mapper.canonicalize(detection.label)
@@ -137,63 +140,52 @@ class PerceptionPipeline:
 
             seen_by_name[canonical_name] = seen_by_name.get(canonical_name, 0) + 1
             object_warnings: list[str] = []
-            if seen_by_name[canonical_name] > 1:
-                object_warnings.append("ambiguous_multiple_instances")
+
+            translation = None
+            quaternion = None
+            covariance = None
+            confidence = 0.0
+            pose_residual_m = None
+            inlier_ratio = None
 
             if depth is None or intrinsics is None:
                 object_warnings.append("insufficient_depth_or_camera_info")
-                facts[canonical_name] = build_object_pose_fact(
-                    name=canonical_name,
-                    present=True,
-                    frame_id=frame_id,
-                    stamp=stamp,
-                    pose_confidence=0.0,
-                    seg_score=detection.score,
-                    warnings=object_warnings,
-                )
-                continue
-
-            try:
-                points = back_project_mask(
-                    depth=depth,
-                    mask=detection.mask,
-                    intrinsics=intrinsics,
-                    max_depth_m=self.pose_max_depth_m,
-                    depth_band_m=self.pose_depth_band_m,
-                    depth_scale_m=self.depth_scale_m,
-                )
-            except ValueError as exc:
-                object_warnings.append(f"back_projection_error:{exc}")
-                facts[canonical_name] = build_object_pose_fact(
-                    name=canonical_name,
-                    present=True,
-                    frame_id=frame_id,
-                    stamp=stamp,
-                    pose_confidence=0.0,
-                    seg_score=detection.score,
-                    warnings=object_warnings,
-                )
-                continue
-            if points.shape[0] < self.min_depth_points:
-                object_warnings.append("insufficient_depth")
-                confidence = 0.0
-                translation = None
-                quaternion = None
-                covariance = None
-                pose_residual_m = None
-                inlier_ratio = None
             else:
-                pose = estimate_pose_pca(points)
-                translation = pose.translation
-                quaternion = pose.quaternion_xyzw
-                covariance = pose.covariance
-                density_score = min(points.shape[0] / float(self.min_depth_points * 4), 1.0)
-                confidence = max(0.0, min(float(detection.score) * density_score * pose.confidence, 1.0))
-                pose_residual_m = pose.residual_m
-                inlier_ratio = pose.inlier_ratio
-                object_warnings.extend(pose.warnings)
-                object_warnings.append("orientation_estimated_pca")
+                try:
+                    points = back_project_mask(
+                        depth=depth,
+                        mask=detection.mask,
+                        intrinsics=intrinsics,
+                        max_depth_m=self.pose_max_depth_m,
+                        depth_band_m=self.pose_depth_band_m,
+                        depth_scale_m=self.depth_scale_m,
+                    )
+                except ValueError as exc:
+                    object_warnings.append(f"back_projection_error:{exc}")
+                    points = np.empty((0, 3), dtype=np.float32)
 
+                if points.shape[0] < self.min_depth_points:
+                    if not any(w.startswith("back_projection_error") for w in object_warnings):
+                        object_warnings.append("insufficient_depth")
+                else:
+                    pose = estimate_pose_pca(points)
+                    translation = pose.translation
+                    quaternion = pose.quaternion_xyzw
+                    covariance = pose.covariance
+                    density_score = min(points.shape[0] / float(self.min_depth_points * 4), 1.0)
+                    confidence = max(0.0, min(float(detection.score) * density_score * pose.confidence, 1.0))
+                    pose_residual_m = pose.residual_m
+                    inlier_ratio = pose.inlier_ratio
+                    object_warnings.extend(pose.warnings)
+                    object_warnings.append("orientation_estimated_pca")
+
+            has_pose = translation is not None and quaternion is not None
+            quality = (1 if has_pose else 0, confidence, float(detection.score))
+            prev = best_quality.get(canonical_name)
+            if prev is not None and quality <= prev:
+                continue
+
+            best_quality[canonical_name] = quality
             facts[canonical_name] = build_object_pose_fact(
                 name=canonical_name,
                 present=True,
@@ -208,6 +200,13 @@ class PerceptionPipeline:
                 inlier_ratio=inlier_ratio,
                 warnings=object_warnings,
             )
+
+        # Flag objects with multiple detected instances on the retained fact.
+        for canonical_name, count in seen_by_name.items():
+            if count > 1 and canonical_name in facts:
+                fact_warnings = facts[canonical_name].setdefault("warnings", [])
+                if "ambiguous_multiple_instances" not in fact_warnings:
+                    fact_warnings.append("ambiguous_multiple_instances")
 
         if not detections:
             segmenter_warning = str(getattr(self.segmenter, "status_warning", "") or "")
