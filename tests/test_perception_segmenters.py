@@ -1,7 +1,7 @@
 from perception.segmenters import SegmenterConfig, build_segmenter, labels_from_registry
 
 
-def test_labels_from_registry_uses_canonical_object_names():
+def test_labels_from_registry_includes_canonical_names_and_aliases():
     labels = labels_from_registry(
         {
             "objects": [
@@ -11,7 +11,10 @@ def test_labels_from_registry_uses_canonical_object_names():
         }
     )
 
-    assert labels == ["cup", "toast"]
+    # OWL-ViT is fed the natural-language aliases AND the canonical names
+    # (sorted), because the zero-shot detector handles aliases better;
+    # canonicalize() maps every alias back to its canonical name.
+    assert labels == ["bread", "cup", "mug", "toast"]
 
 
 def test_build_noop_segmenter_does_not_load_model():
