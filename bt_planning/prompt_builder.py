@@ -71,7 +71,16 @@ def build_planner_prompt(task_name: str, planner_registry_json: dict, scene_fact
 
     prompt += [
         "---",
+        "Output format (JSON only, no prose, no XML, no markdown fences):",
+        _json_block({
+            "task_name": task_name,
+            "steps": [
+                {"kind": "<robot_skill|human_step|vlm_gate>", "name": "<name from registry>"}
+            ]
+        }),
+        "---",
         "Instructions:",
+        f'- The top-level JSON object MUST contain "task_name": "{task_name}".',
         "- Return Linear IR JSON only.",
         "- Return a valid JSON plan only.",
         "- Do NOT return XML.",
