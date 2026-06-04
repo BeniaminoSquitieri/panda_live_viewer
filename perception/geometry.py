@@ -82,10 +82,16 @@ def decode_depth_image(msg: Any) -> np.ndarray:
     return array[:expected].reshape((height, width))
 
 
-def depth_to_meters(depth: np.ndarray) -> np.ndarray:
-    """Convert supported depth arrays to meters."""
+def depth_to_meters(depth: np.ndarray, scale_m: float = 0.001) -> np.ndarray:
+    """Convert supported depth arrays to meters.
+
+    ``scale_m`` is the meters-per-raw-unit factor applied to integer depth maps.
+    The ROS convention for 16UC1 is millimeters (0.001), but some RealSense
+    devices (e.g. D405) report depth in 0.1 mm units (0.0001). float32 depth is
+    assumed to already be in meters.
+    """
     if depth.dtype == np.uint16:
-        return depth.astype(np.float32) * 0.001
+        return depth.astype(np.float32) * float(scale_m)
     return depth.astype(np.float32)
 
 
@@ -97,6 +103,7 @@ def back_project_mask(
     max_points: int = 4096,
     max_depth_m: float = 0.0,
     depth_band_m: float = 0.0,
+    depth_scale_m: float = 0.001,
 ) -> np.ndarray:
     """Back-project valid masked depth pixels into camera-frame XYZ points.
 
@@ -116,7 +123,7 @@ def back_project_mask(
             f"{intrinsics.width}x{intrinsics.height}."
         )
 
-    depth_m = depth_to_meters(depth)
+    depth_m = depth_to_meters(depth, scale_m=depth_scale_m)
     valid = mask.astype(bool) & np.isfinite(depth_m) & (depth_m > 0.0)
     rows, cols = np.nonzero(valid)
     if rows.size == 0:

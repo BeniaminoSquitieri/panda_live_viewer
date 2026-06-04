@@ -73,9 +73,9 @@ def _decode_depth(msg: Image):
     return arr[:expected].reshape((height, width))
 
 
-def _depth_to_meters(depth: np.ndarray) -> np.ndarray:
+def _depth_to_meters(depth: np.ndarray, scale_m: float = 0.001) -> np.ndarray:
     if depth.dtype == np.uint16:
-        return depth.astype(np.float32) * 0.001
+        return depth.astype(np.float32) * float(scale_m)
     return depth.astype(np.float32)
 
 
@@ -86,6 +86,8 @@ def main() -> None:
     parser.add_argument("--registry", default="")
     parser.add_argument("--model", default="google/owlv2-base-patch16-ensemble")
     parser.add_argument("--threshold", type=float, default=0.02)
+    parser.add_argument("--depth-scale", type=float, default=0.001,
+                        help="meters per raw depth unit (D405 uses 0.0001)")
     parser.add_argument(
         "--out-dir",
         default=str(Path.home() / "panda_live_viewer" / "snapshots"),
@@ -110,7 +112,7 @@ def main() -> None:
     if depth is None:
         print(f"[snapshot] WARNING: no depth frame on {args.depth_topic}")
     else:
-        depth_m = _depth_to_meters(depth)
+        depth_m = _depth_to_meters(depth, scale_m=args.depth_scale)
         finite = depth_m[np.isfinite(depth_m) & (depth_m > 0)]
         if finite.size:
             print(

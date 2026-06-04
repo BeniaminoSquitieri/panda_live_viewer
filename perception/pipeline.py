@@ -102,11 +102,13 @@ class PerceptionPipeline:
         *,
         pose_max_depth_m: float = 0.0,
         pose_depth_band_m: float = 0.0,
+        depth_scale_m: float = 0.001,
     ):
         self.segmenter = segmenter or NoopSegmenter()
         self.min_depth_points = int(min_depth_points)
         self.pose_max_depth_m = float(pose_max_depth_m)
         self.pose_depth_band_m = float(pose_depth_band_m)
+        self.depth_scale_m = float(depth_scale_m)
 
     def run(
         self,
@@ -158,6 +160,7 @@ class PerceptionPipeline:
                     intrinsics=intrinsics,
                     max_depth_m=self.pose_max_depth_m,
                     depth_band_m=self.pose_depth_band_m,
+                    depth_scale_m=self.depth_scale_m,
                 )
             except ValueError as exc:
                 object_warnings.append(f"back_projection_error:{exc}")
