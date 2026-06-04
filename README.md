@@ -247,10 +247,104 @@ emitted, and missing or stale RGB-D/TF data degrades the fact instead of
 fabricating geometry. `require_query_pose_service` defaults to true so the node
 fails fast when `QueryObjectPose.srv` has not been rebuilt and sourced.
 
+## ROS 2 / CycloneDDS environment
+
+ROS 2 middleware settings are centralized in `ros_env.sh` (repo root) so you
+never have to export them by hand on any machine. It is idempotent, honours
+pre-set values, and is machine-agnostic (the per-host `~/.ros/cyclonedds.xml`
+holds the network interface/peers). It sets `ROS_DOMAIN_ID=0`,
+`RMW_IMPLEMENTATION=rmw_cyclonedds_cpp`, `CYCLONEDDS_URI` (only if the XML
+exists) and unsets `ROS_LOCALHOST_ONLY`.
+
+`run.sh` sources it automatically. For interactive shells, source it once (or add
+the line to `~/.bashrc`):
+
+```bash
+source ~/panda_live_viewer/ros_env.sh
+```
+
+## Testing: where each test runs (local robot vs GPU server)
+
+The pipeline spans two machines that talk over CycloneDDS (auto-configured by
+`ros_env.sh`, see "ROS 2 / CycloneDDS environment"):
+
+- **Local robot machine** — owns the RealSense cameras, runs the lerobot BT
+  server (camera owner), the perception node and the robot. All hardware/RGB-D
+  tests run here.
+- **GPU server** — runs the VLM model server (Qwen3-VL-32B) and the `vlm_live`
+  node (`run.sh`). All live VLM/verifier tests run here.
+
+Activate the right Python env first on each machine (e.g. `conda activate
+lerobot` locally, `conda activate ros2_jazzy` on the server).
+
+### A. Offline test suites (pytest) — no robot, no GPU
+
+Run these on **both** machines after every `git pull` (fast sanity that the code
+imports and behaves the same in each environment). None need hardware.
+
+```bash
+# panda_live_viewer — perception logic (12 tests)
+cd ~/panda_live_viewer
+python -m pytest tests/test_perception_pipeline.py tests/test_perception_geometry.py \
+                 tests/test_perception_segmenters.py tests/test_scene_facts.py -q
+
+# panda_live_viewer — VLM / planner / scene-facts enrichment
+python -m pytest tests/test_vlm_status_protocol.py tests/test_baseline_prompts.py \
+                 tests/test_plan_parser.py tests/test_service_logic.py \
+                 tests/test_verifier_experiment_log.py -q
+
+# lerobot — spatial-prior gate (30) + camera_static_tf_map publisher (5)
+cd ~/lerobot
+python -m pytest src/lerobot_bt_python/test_spatial_prior.py \
+                 src/lerobot_bt_python/test_camera_publisher.py -q
+
+# lerobot — offline gate smoke test (PASS / FAIL / ABSTAIN, exit 0)
+python scripts/smoke_spatial_prior_gate.py
+```
+
+> Known pre-existing failures (NOT a regression): `tests/test_vlm_node_static.py`
+> has 2 static-analysis assertions that no longer match the current node
+> structure. They fail on a clean checkout too; track them separately.
+
+### B. Built-workspace tests (need `colcon build` + `source install/setup.bash`)
+
+The lerobot BT suite imports compiled packages, so it only runs after the ROS
+workspace is built (typically on the server, or wherever you build):
+
+```bash
+cd ~/lerobot
+colcon build --packages-select lerobot_bt_interfaces lerobot_bt_python
+source install/setup.bash
+python -m pytest tests/lerobot_bt -q   # BT generation, safety, contracts
+```
+
+### C. Hardware end-to-end (LOCAL robot machine only)
+
+The RGB-D perception path needs the real cameras, so it runs on the local robot
+machine: see "Robot-Day Step-by-Step Testing" steps 2–8 below (camera topics,
+static TF, perception node, `scene_facts`, `query_pose`, metric sanity).
+
+### D. Live VLM / verifier (GPU server only)
+
+Start the model server + node on the server and confirm the verifier responds:
+
+```bash
+cd ~/panda_live_viewer
+./run.sh            # starts Qwen3-VL model server (if down) + vlm_live node
+./status.sh         # ALIVE + socket/log healthy
+```
+
+### E. Cross-machine integration (perception local ↔ VLM server, via DDS)
+
+With the perception node up locally and the VLM node up on the server, confirm
+the one-way flow: `/perception/scene_facts` published locally is consumed by the
+VLM node (planner injection + read-only verifier enrichment). See step 9 below.
+
 ## Robot-Day Step-by-Step Testing
 
-End-to-end smoke test for the RGB-D perception path on the real robot. Run the
-steps in order; do not skip the verification command at each step.
+End-to-end smoke test for the RGB-D perception path on the real robot (category
+**C** above). Run the steps in order; do not skip the verification command at
+each step.
 
 > Camera ownership: the **lerobot BT server** opens the RealSense devices and
 > republishes their frames. Do **NOT** start `panda_live_camera` (or any other
