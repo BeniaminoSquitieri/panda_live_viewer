@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Single entry point: starts the model server if not already running,
 # then starts the ROS node pointing to it.
-# Usage: ./run.sh [extra ros args...]
+# Usage: ./run.sh [--reuse-model|--reload-model|--no-load-model|--external-model-url URL] [extra ros args...]
 
 set -eo pipefail
 
@@ -21,6 +21,85 @@ PID_FILE="$RUNTIME_DIR/vlm_server.pid"
 SERVER_LOG="$RUNTIME_DIR/vlm_server.log"
 META_FILE="$RUNTIME_DIR/vlm_server.json"
 VERIFIER_LOG="/home/bsquitieri/lerobot/generated_bt/experiments/verifier_events.jsonl"
+MODEL_SERVER_MODE="${MODEL_SERVER_MODE:-auto}"
+EXTERNAL_MODEL_URL="${EXTERNAL_MODEL_URL:-${MODEL_SERVER_URL:-}}"
+VLM_CAMERA_VIEW="${VLM_CAMERA_VIEW:-front}"
+ROS_ARGS=()
+
+usage() {
+    cat <<EOF
+Usage: ./run.sh [model mode] [extra ros args...]
+
+Model modes:
+  --auto-model      Start model server if missing, otherwise reuse it (default).
+  --reuse-model     Reuse an already-running model server; fail if it is missing.
+  --reload-model    Stop this user's model server and load the model again.
+  --no-load-model   Do not start/load a local model server; pass ROS args through.
+  --external-model-url URL
+                   Use an existing OpenAI-compatible HTTP server, e.g. vLLM.
+
+Environment:
+  MODEL_SERVER_MODE=auto|reuse|reload|off|external  Same as the flags above.
+  EXTERNAL_MODEL_URL=http://127.0.0.1:23333       Existing HTTP model server.
+  VLM_CAMERA_VIEW=front|both                       Image sent to the VLM.
+EOF
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --auto-model)
+            MODEL_SERVER_MODE="auto"
+            shift
+            ;;
+        --reuse-model)
+            MODEL_SERVER_MODE="reuse"
+            shift
+            ;;
+        --reload-model)
+            MODEL_SERVER_MODE="reload"
+            shift
+            ;;
+        --no-load-model)
+            MODEL_SERVER_MODE="off"
+            shift
+            ;;
+        --external-model-url)
+            MODEL_SERVER_MODE="external"
+            EXTERNAL_MODEL_URL="${2:-}"
+            if [ -z "$EXTERNAL_MODEL_URL" ]; then
+                echo "[run.sh] ERROR: --external-model-url requires a URL"
+                exit 2
+            fi
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        --)
+            shift
+            ROS_ARGS+=("$@")
+            break
+            ;;
+        *)
+            ROS_ARGS+=("$1")
+            shift
+            ;;
+    esac
+done
+
+if [ -n "$EXTERNAL_MODEL_URL" ] && [ "$MODEL_SERVER_MODE" = "auto" ]; then
+    MODEL_SERVER_MODE="external"
+fi
+
+case "$MODEL_SERVER_MODE" in
+    auto|reuse|reload|off|external) ;;
+    *)
+        echo "[run.sh] ERROR: invalid MODEL_SERVER_MODE=$MODEL_SERVER_MODE"
+        usage
+        exit 2
+        ;;
+esac
 
 # shellcheck disable=SC1090
 source "$LEROBOT_SETUP"
@@ -42,21 +121,71 @@ MIN_FREE_MIB="${MIN_FREE_MIB:-34000}"
 # GPUs to never use (e.g. reserved/unstable). Space-separated indices.
 EXCLUDED_GPUS="1"
 
-# Pick the GPU with the most free memory at startup time, skipping excluded ones.
-_grep_excl=$(echo "$EXCLUDED_GPUS" | tr ' ' '|')
-read -r BEST_GPU BEST_FREE < <(nvidia-smi --query-gpu=index,memory.free \
-    --format=csv,noheader,nounits \
-    | grep -vE "^[[:space:]]*($_grep_excl)[[:space:]]*," \
-    | sort -t',' -k2 -rn | head -1 | tr ',' ' ')
-export CUDA_VISIBLE_DEVICES="$BEST_GPU"
-echo "[run.sh] Using GPU $BEST_GPU (${BEST_FREE} MiB free, excluding GPU(s): $EXCLUDED_GPUS)."
-if [ "${BEST_FREE:-0}" -lt "$MIN_FREE_MIB" ]; then
-    echo "[run.sh] WARNING: no GPU has >= ${MIN_FREE_MIB} MiB free."
-    echo "[run.sh] WARNING: the model will offload to CPU and inference will be"
-    echo "[run.sh] WARNING: very slow (minutes/request). Free a GPU or wait for"
-    echo "[run.sh] WARNING: other jobs to finish for full-speed inference."
+if [ "$MODEL_SERVER_MODE" != "off" ] && [ "$MODEL_SERVER_MODE" != "external" ]; then
+    # Pick the GPU with the most free memory at startup time, skipping excluded ones.
+    _grep_excl=$(echo "$EXCLUDED_GPUS" | tr ' ' '|')
+    read -r BEST_GPU BEST_FREE < <(nvidia-smi --query-gpu=index,memory.free \
+        --format=csv,noheader,nounits \
+        | grep -vE "^[[:space:]]*($_grep_excl)[[:space:]]*," \
+        | sort -t',' -k2 -rn | head -1 | tr ',' ' ')
+    export CUDA_VISIBLE_DEVICES="$BEST_GPU"
+    echo "[run.sh] Using GPU $BEST_GPU (${BEST_FREE} MiB free, excluding GPU(s): $EXCLUDED_GPUS)."
+    if [ "${BEST_FREE:-0}" -lt "$MIN_FREE_MIB" ]; then
+        echo "[run.sh] WARNING: no GPU has >= ${MIN_FREE_MIB} MiB free."
+        echo "[run.sh] WARNING: the model will offload to CPU and inference will be"
+        echo "[run.sh] WARNING: very slow (minutes/request). Free a GPU or wait for"
+        echo "[run.sh] WARNING: other jobs to finish for full-speed inference."
+    fi
 fi
 cd "$SCRIPT_DIR"
+
+if [ "$MODEL_SERVER_MODE" = "off" ]; then
+    echo "[run.sh] Model server disabled (--no-load-model). Starting ROS node without local model_server_url..."
+    exec python3 -u -m vlm_live.cli \
+        --ros-args \
+        -p lazy_load_model:=true \
+        -p disable_model_load:=true \
+        -p vlm_camera_view:="$VLM_CAMERA_VIEW" \
+        -p planner_dry_run:=false \
+        -p require_generate_plan_service:=true \
+        -p verifier_experiment_log_path:="$VERIFIER_LOG" \
+        "${ROS_ARGS[@]}"
+fi
+
+if [ "$MODEL_SERVER_MODE" = "external" ]; then
+    if [ -z "$EXTERNAL_MODEL_URL" ]; then
+        echo "[run.sh] ERROR: external model mode requires EXTERNAL_MODEL_URL or --external-model-url URL"
+        exit 2
+    fi
+    echo "[run.sh] Using external model server: $EXTERNAL_MODEL_URL"
+    exec python3 -u -m vlm_live.cli \
+        --ros-args \
+        -p model_server_url:="$EXTERNAL_MODEL_URL" \
+        -p lazy_load_model:=true \
+        -p vlm_camera_view:="$VLM_CAMERA_VIEW" \
+        -p planner_dry_run:=false \
+        -p require_generate_plan_service:=true \
+        -p verifier_experiment_log_path:="$VERIFIER_LOG" \
+        "${ROS_ARGS[@]}"
+fi
+
+if [ "$MODEL_SERVER_MODE" = "reload" ]; then
+    if [ -f "$PID_FILE" ]; then
+        OLD_PID=$(cat "$PID_FILE")
+        if kill -0 "$OLD_PID" 2>/dev/null; then
+            echo "[run.sh] Reload requested. Stopping model server PID $OLD_PID..."
+            kill "$OLD_PID" 2>/dev/null || true
+            sleep 2
+        fi
+    fi
+    ZOMBIES=$(pgrep -u "$(id -u)" -f "vlm_live.model_server" || true)
+    if [ -n "$ZOMBIES" ]; then
+        echo "[run.sh] Reload requested. Cleaning up model_server processes: $ZOMBIES"
+        kill $ZOMBIES 2>/dev/null || true
+        sleep 2
+    fi
+    rm -f "$SOCKET_PATH" "$PID_FILE"
+fi
 
 # Kill any stale server process whose socket no longer exists
 if [ -f "$PID_FILE" ]; then
@@ -77,6 +206,11 @@ fi
 # If no live server (socket missing), kill any of OUR leftover model_server
 # processes so zombies don't pile up and waste GPU memory.
 if [ ! -S "$SOCKET_PATH" ]; then
+    if [ "$MODEL_SERVER_MODE" = "reuse" ]; then
+        echo "[run.sh] ERROR: --reuse-model requested, but socket is missing: $SOCKET_PATH"
+        echo "[run.sh] Start the server first with ./run.sh --auto-model or scripts/start_model_server.sh."
+        exit 1
+    fi
     ZOMBIES=$(pgrep -u "$(id -u)" -f "vlm_live.model_server" || true)
     if [ -n "$ZOMBIES" ]; then
         echo "[run.sh] Cleaning up leftover model_server processes: $ZOMBIES"
@@ -132,7 +266,8 @@ exec python3 -u -m vlm_live.cli \
     --ros-args \
     -p model_server_url:="$SOCKET_PATH" \
     -p lazy_load_model:=true \
+    -p vlm_camera_view:="$VLM_CAMERA_VIEW" \
     -p planner_dry_run:=false \
     -p require_generate_plan_service:=true \
     -p verifier_experiment_log_path:="$VERIFIER_LOG" \
-    "$@"
+    "${ROS_ARGS[@]}"

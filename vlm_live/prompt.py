@@ -71,6 +71,7 @@ def build_prompt(request: Dict[str, Any], reasoning: bool) -> str:
     task_text = request.get("task") or ""
     scene_context = (request.get("scene_context") or "").strip()
     allowed_statuses = _allowed_statuses_for_prompt(request)
+    camera_view = str(request.get("camera_view") or "front").strip().lower()
     status_spec = "|".join(allowed_statuses)
     status_text = ", ".join(allowed_statuses)
     wait_human_instruction = ""
@@ -86,12 +87,23 @@ def build_prompt(request: Dict[str, Any], reasoning: bool) -> str:
             "pipeline; use only as spatial context, do not invent coordinates):\n"
             f"{scene_context}\n"
         )
+    if camera_view == "both":
+        camera_instruction = (
+            "The image shows two camera views side by side: the LEFT half is the fixed 'Front camera' and the RIGHT half is the moving 'Wrist camera' mounted on the gripper.\n"
+            "The two cameras see the same workspace from different angles, so each object is usually visible in only one view. Consider an object PRESENT if it is visible in AT LEAST ONE of the two views; do NOT require it to appear in both.\n"
+            "Inspect EACH half of the image separately and exhaustively before concluding anything is missing: first scan the LEFT (Front) half, then scan the RIGHT (Wrist) half. An object counts as present if it appears in EITHER scan.\n"
+            "Some objects are easy to miss: cups and mugs may be transparent, white, reflective, empty, small, tilted, partially occluded by other objects, or only partially inside the frame (e.g. at an edge or in the gripper). Do NOT report such an object as absent unless you have carefully searched BOTH halves and still cannot find it.\n"
+        )
+    else:
+        camera_instruction = (
+            "The image shows only the fixed Front camera view. Base your decision exclusively on this Front camera image.\n"
+            "Do not mention, require, infer, or wait for any additional camera view. If the requested condition is not visible in the Front camera, judge only from the available Front camera evidence.\n"
+            "Some objects are easy to miss: cups and mugs may be transparent, white, reflective, empty, small, tilted, partially occluded by other objects, or only partially inside the frame. Do NOT report such an object as absent unless you have carefully searched the Front camera image.\n"
+        )
     common_header = (
-        "You are a robotic task verifier. Inspect the live camera scene and decide whether the requested condition is satisfied.\n"
-        "The image shows two camera views side by side: the LEFT half is the fixed 'Front camera' and the RIGHT half is the moving 'Wrist camera' mounted on the gripper.\n"
-        "The two cameras see the same workspace from different angles, so each object is usually visible in only one view. Consider an object PRESENT if it is visible in AT LEAST ONE of the two views; do NOT require it to appear in both.\n"
-        "Inspect EACH half of the image separately and exhaustively before concluding anything is missing: first scan the LEFT (Front) half, then scan the RIGHT (Wrist) half. An object counts as present if it appears in EITHER scan.\n"
-        "Some objects are easy to miss: cups and mugs may be transparent, white, reflective, empty, small, tilted, partially occluded by other objects, or only partially inside the frame (e.g. at an edge or in the gripper). Do NOT report such an object as absent unless you have carefully searched BOTH halves and still cannot find it.\n"
+        "You are an object-state verifier. Inspect the live camera scene and decide whether the requested object condition is satisfied.\n"
+        "Focus on task-relevant objects, their presence, and their final locations. Do not use robot arm pose, gripper contact, grasping, lifting, or motion as evidence unless the request explicitly asks about the robot itself.\n"
+        f"{camera_instruction}"
         f"Check name: {request['skill_name']}\n"
         f"Attempt id: {request['attempt_id']}\n"
         f"{task_line}"
@@ -108,7 +120,7 @@ def build_prompt(request: Dict[str, Any], reasoning: bool) -> str:
             + wait_human_instruction
             + "Choose SUCCESS only when the condition is fully satisfied.\n"
             + "Choose RUNNING when evidence is insufficient or the condition is not yet satisfied.\n"
-            + "Choose FAILURE when the condition clearly failed and retrying the action is appropriate."
+            + "Choose FAILURE only for an explicit, irreversible wrong outcome. If an object is unclear, occluded, hard to see, or temporarily not visible, choose RUNNING."
         )
 
     return (
@@ -117,7 +129,7 @@ def build_prompt(request: Dict[str, Any], reasoning: bool) -> str:
         + wait_human_instruction
         + "Choose SUCCESS only when the condition is fully satisfied.\n"
         + "Choose RUNNING when evidence is insufficient or the condition is not yet satisfied.\n"
-        + "Choose FAILURE when the condition clearly failed and retrying the action is appropriate."
+        + "Choose FAILURE only for an explicit, irreversible wrong outcome. If an object is unclear, occluded, hard to see, or temporarily not visible, choose RUNNING."
     )
 
 

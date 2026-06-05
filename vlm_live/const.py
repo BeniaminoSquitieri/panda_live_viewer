@@ -37,7 +37,7 @@ VIEW_HOST = "0.0.0.0"
 VIEW_PORT = 8081
 VIEW_FPS = 10.0
 MAX_NEW_TOKENS = 64
-PLANNER_MAX_NEW_TOKENS = 512
+PLANNER_MAX_NEW_TOKENS = 1024
 
 # When non-empty, inference is forwarded to a persistent model_server process
 # via Unix socket instead of loading the model in-process. No network port is

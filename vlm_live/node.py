@@ -39,6 +39,7 @@ from .const import (
     WRIST_TOPIC,
 )
 from .camera import compose, decode_image
+from .camera import compose_front
 from .experiment_log import append_verifier_event, build_verifier_event
 from .prompt import build_prompt, fit_status, format_scene_context
 from .protocol import build_result_payload, coerce_result_for_request, parse_request
@@ -75,6 +76,8 @@ class NodeConfig:
     scene_facts_topic: str
     verifier_experiment_log_path: str
     model_server_url: str
+    disable_model_load: bool
+    vlm_camera_view: str
 
 
 class VlmNode(Node):
@@ -107,13 +110,16 @@ class VlmNode(Node):
         self.scene_facts_topic = cfg.scene_facts_topic
         self.verifier_experiment_log_path = cfg.verifier_experiment_log_path
         self.model_server_url = cfg.model_server_url
+        self.disable_model_load = cfg.disable_model_load
+        self.vlm_camera_view = cfg.vlm_camera_view
 
         self._init_state()
         self._init_ros_interfaces()
         # Dry-run planning relies on this guard to avoid loading Qwen/GPU at startup.
         # When model_server_url is set the model lives in a separate process.
-        if not self.lazy_load_model and not self.model_server_url:
-            self._ensure_vlm_loaded()
+        if not self.lazy_load_model:
+            if not self.model_server_url and not self.disable_model_load:
+                self._ensure_vlm_loaded()
         self._start_worker()
 
         if self.show_view:
@@ -154,6 +160,10 @@ class VlmNode(Node):
         # instead of loading the model in this process.  Example:
         #   -p model_server_url:=http://127.0.0.1:8765
         self.declare_parameter("model_server_url", MODEL_SERVER_URL)
+        # When true, live VLM calls fail fast instead of loading weights locally.
+        self.declare_parameter("disable_model_load", False)
+        # Which camera image to send to the VLM: "front" or "both".
+        self.declare_parameter("vlm_camera_view", "front")
 
     def _load_config(self) -> NodeConfig:
         """Read and normalize parameter values into an immutable config object."""
@@ -186,6 +196,8 @@ class VlmNode(Node):
                 self.get_parameter("verifier_experiment_log_path").value
             ),
             model_server_url=str(self.get_parameter("model_server_url").value).strip(),
+            disable_model_load=bool(self.get_parameter("disable_model_load").value),
+            vlm_camera_view=str(self.get_parameter("vlm_camera_view").value).strip().lower(),
         )
 
     def _init_state(self) -> None:
@@ -308,6 +320,11 @@ class VlmNode(Node):
 
     def _ensure_vlm_loaded(self) -> None:
         """Load the VLM on first use, guarded by the inference lock."""
+        if self.disable_model_load:
+            raise RuntimeError(
+                "VLM model loading is disabled by disable_model_load=true. "
+                "Start a model server or rerun without --no-load-model for live VLM calls."
+            )
         if self._vlm_loaded():
             return
 
@@ -457,6 +474,8 @@ class VlmNode(Node):
 
     def _compose_scene(self) -> Optional[np.ndarray]:
         front, wrist = self._get_frames()
+        if self.vlm_camera_view != "both":
+            return compose_front(front)
         return compose(front, wrist)
 
     def _wait_for_scene(self, timeout_s: float = 10.0) -> Optional[np.ndarray]:
@@ -476,11 +495,14 @@ class VlmNode(Node):
     def _run_vlm(self, request: dict):
         scene = self._compose_scene()
         if scene is None:
-            return STATUS_RUNNING, "Waiting for both camera streams."
+            if self.vlm_camera_view == "both":
+                return STATUS_RUNNING, "Waiting for camera streams."
+            return STATUS_RUNNING, "Waiting for front camera stream."
 
         scene_context = format_scene_context(self._get_latest_scene_facts_json())
         if scene_context and not request.get("scene_context"):
             request = {**request, "scene_context": scene_context}
+        request = {**request, "camera_view": self.vlm_camera_view}
 
         prompt = build_prompt(request, self.reasoning)
 
@@ -543,6 +565,39 @@ class VlmNode(Node):
                 logger=self.get_logger(),
             )
 
+    def _downgrade_uncertain_failure(self, status: str, reason: str) -> tuple[str, str]:
+        """Treat visibility/uncertainty failures as non-terminal RUNNING."""
+        if status != STATUS_FAILURE:
+            return status, reason
+
+        reason_lower = (reason or "").lower()
+        uncertainty_markers = (
+            "not visible",
+            "not clearly visible",
+            "no clear evidence",
+            "not clear",
+            "unclear",
+            "cannot confirm",
+            "does not confirm",
+            "no definitive",
+            "insufficient",
+            "hard to see",
+            "occluded",
+            "possibly",
+            "appears",
+            "current frame",
+        )
+        if any(marker in reason_lower for marker in uncertainty_markers):
+            logger = self.get_logger() if self is not None else None
+            if logger is not None:
+                logger.warning(
+                    "Downgrading uncertain VLM FAILURE to RUNNING: "
+                    f"{reason}"
+                )
+            return STATUS_RUNNING, reason
+
+        return status, reason
+
     def _on_generate_plan(self, request, response):
         """Handle the planner service; dry_run must not invoke the VLM backend."""
         result = build_generate_plan_response(
@@ -594,6 +649,7 @@ class VlmNode(Node):
 
             raw_status = status
             status, reason = coerce_result_for_request(request, status, reason)
+            status, reason = self._downgrade_uncertain_failure(status, reason)
             was_wait_human_coerced = raw_status == STATUS_WAIT_HUMAN and status == STATUS_RUNNING
             if not was_wait_human_coerced:
                 status = fit_status(status, request.get("allowed_statuses", DEFAULT_ALLOWED_STATUSES))

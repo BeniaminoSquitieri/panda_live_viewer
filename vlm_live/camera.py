@@ -72,6 +72,13 @@ def compose(front: Optional[np.ndarray], wrist: Optional[np.ndarray]) -> Optiona
     return np.hstack([label(front, "Front camera"), label(wrist, "Wrist camera")])
 
 
+def compose_front(front: Optional[np.ndarray]) -> Optional[np.ndarray]:
+    """Build a scene from the front camera only."""
+    if front is None:
+        return None
+    return label(_resize(front), "Front camera")
+
+
 def save_image(scene: np.ndarray) -> str:
     """Persist a scene to a temporary PNG file and return the file path."""
     img = _PILImage.fromarray(scene)

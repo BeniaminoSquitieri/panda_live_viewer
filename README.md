@@ -37,6 +37,38 @@ Per testare un modello più piccolo:
 MODEL_PATH=~/models/Qwen3-VL-4B-Instruct MIN_FREE_MIB=9000 ./run.sh
 ```
 
+### Controllare il caricamento del modello
+
+I pesi sono già salvati su disco in `MODEL_PATH`; quello che richiede tempo è
+caricarli nella RAM della GPU. Per evitare di ricaricarli a ogni avvio, lascia
+vivo il `vlm_live.model_server`: `Ctrl+C` su `./run.sh` ferma solo il nodo ROS,
+non il server del modello.
+
+```bash
+./run.sh                 # default: avvia il model server se manca, altrimenti lo riusa
+./run.sh --reuse-model   # riusa solo un server già vivo; fallisce se manca
+./run.sh --reload-model  # ferma il tuo model server e ricarica i pesi
+./run.sh --no-load-model # non carica pesi; eventuali chiamate live VLM falliscono subito
+./run.sh --external-model-url http://127.0.0.1:23333
+                         # usa un server OpenAI-compatible gia attivo, per esempio vLLM
+```
+
+Gli stessi modi sono disponibili via variabile d'ambiente:
+
+```bash
+MODEL_SERVER_MODE=reuse ./run.sh
+MODEL_SERVER_MODE=reload ./run.sh
+MODEL_SERVER_MODE=off ./run.sh
+EXTERNAL_MODEL_URL=http://127.0.0.1:23333 ./run.sh
+```
+
+By default, live VLM inference uses only the Front camera image. To send the old
+side-by-side Front+Wrist image instead:
+
+```bash
+VLM_CAMERA_VIEW=both ./run.sh
+```
+
 > **Prerequisito**: `~/lerobot/install/setup.bash` deve esistere.
 > Vedi la sezione [lerobot ROS workspace](#lerobot-ros-workspace-interfaces-only) se non è ancora costruito.
 
