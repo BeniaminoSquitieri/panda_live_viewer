@@ -1,5 +1,4 @@
 import numpy as np
-
 from perception.geometry import CameraIntrinsics
 from perception.pipeline import Detection, PerceptionPipeline
 
@@ -59,5 +58,7 @@ def test_pipeline_fails_closed_without_segmenter():
         stamp=1.0,
     )
 
-    assert result.facts == {}
+    assert result.facts["toast"]["present"] is False
+    assert result.facts["toast"]["observation_status"] == "NOT_DETECTED"
+    assert "pose" not in result.facts["toast"]
     assert "segmenter_no_detections" in result.warnings

@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any, Iterable, Mapping, Protocol
+from typing import Any, Protocol
 
 import numpy as np
-
 from bt_planning.scene_facts import build_object_pose_fact
 
-from .geometry import CameraIntrinsics, back_project_mask, estimate_pose_pca
+from .contracts import ObservationStatus, enrich_fact_contract
+from .geometry import CameraIntrinsics, back_project_mask, estimate_pose_pca, robust_filter_points
 
 
 @dataclass(frozen=True)
@@ -44,7 +45,7 @@ class RegistryMapper:
     aliases: dict[str, str]
 
     @classmethod
-    def from_registry(cls, registry: Mapping[str, Any] | None) -> "RegistryMapper":
+    def from_registry(cls, registry: Mapping[str, Any] | None) -> RegistryMapper:
         registry = registry or {}
         aliases: dict[str, str] = {}
         canonical_names: set[str] = set()
@@ -184,6 +185,7 @@ class PerceptionPipeline:
                         depth_band_m=self.pose_depth_band_m,
                         depth_scale_m=self.depth_scale_m,
                     )
+                    points = robust_filter_points(points)
                 except ValueError as exc:
                     object_warnings.append(f"back_projection_error:{exc}")
                     points = np.empty((0, 3), dtype=np.float32)
@@ -223,12 +225,37 @@ class PerceptionPipeline:
                 inlier_ratio=inlier_ratio,
                 warnings=object_warnings,
             )
+            fact["observation_status"] = (
+                ObservationStatus.DETECTED_WITH_POSE
+                if has_pose
+                else ObservationStatus.DETECTED_NO_POSE
+            )
+            fact["geometry_quality"] = confidence
+            enrich_fact_contract(fact)
             quality = (1 if has_pose else 0, confidence, float(detection.score))
             candidates.setdefault(canonical_name, []).append(
                 _Candidate(fact=fact, centroid=centroid, quality=quality)
             )
 
         facts = self._resolve_candidates(candidates, warnings)
+
+        # Missing detections are explicit observations, not proof of absence.
+        # This distinction lets semantic consumers render UNKNOWN/NOT_DETECTED
+        # without inventing a metric pose.
+        for canonical_name in mapper.canonical_names:
+            if canonical_name in facts:
+                continue
+            missing_fact = build_object_pose_fact(
+                name=canonical_name,
+                present=False,
+                frame_id=frame_id,
+                stamp=stamp,
+                pose_confidence=0.0,
+                warnings=["not_detected_in_frame"],
+            )
+            missing_fact["observation_status"] = ObservationStatus.NOT_DETECTED
+            missing_fact["geometry_quality"] = 0.0
+            facts[canonical_name] = enrich_fact_contract(missing_fact)
 
         # Flag objects with multiple detected instances on the retained fact.
         for canonical_name, count in seen_by_name.items():
@@ -245,7 +272,7 @@ class PerceptionPipeline:
 
     def _resolve_candidates(
         self,
-        candidates: dict[str, list["_Candidate"]],
+        candidates: dict[str, list[_Candidate]],
         warnings: list[str],
     ) -> dict[str, Any]:
         """Select one fact per object, applying spatial support preferences."""

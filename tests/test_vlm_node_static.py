@@ -123,6 +123,11 @@ def _install_minimal_ros_stubs() -> list[str]:
         setattr(callback_groups_mod, "ReentrantCallbackGroup", _DummyReentrantCallbackGroup)
     setattr(rclpy_mod, "callback_groups", callback_groups_mod)
 
+    qos_mod = ensure_module("rclpy.qos")
+    if not hasattr(qos_mod, "qos_profile_sensor_data"):
+        setattr(qos_mod, "qos_profile_sensor_data", object())
+    setattr(rclpy_mod, "qos", qos_mod)
+
     sensor_msgs_mod = ensure_module("sensor_msgs")
     sensor_msgs_msg_mod = ensure_module("sensor_msgs.msg")
     if not hasattr(sensor_msgs_msg_mod, "CompressedImage"):

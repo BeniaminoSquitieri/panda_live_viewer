@@ -52,8 +52,8 @@ def camera_info_to_intrinsics(msg: Any) -> CameraIntrinsics:
     if len(k) != 9:
         raise ValueError("CameraInfo.k must contain 9 values.")
     return CameraIntrinsics(
-        width=int(getattr(msg, "width")),
-        height=int(getattr(msg, "height")),
+        width=int(msg.width),
+        height=int(msg.height),
         fx=float(k[0]),
         fy=float(k[4]),
         cx=float(k[2]),
@@ -64,9 +64,9 @@ def camera_info_to_intrinsics(msg: Any) -> CameraIntrinsics:
 def decode_depth_image(msg: Any) -> np.ndarray:
     """Decode a ROS Image-like depth message into a 2D numpy array."""
     encoding = str(getattr(msg, "encoding", "")).upper()
-    width = int(getattr(msg, "width"))
-    height = int(getattr(msg, "height"))
-    data = getattr(msg, "data")
+    width = int(msg.width)
+    height = int(msg.height)
+    data = msg.data
 
     if encoding in {"16UC1", "MONO16"}:
         dtype = np.uint16
@@ -153,6 +153,33 @@ def back_project_mask(
     x = (cols.astype(np.float32) - intrinsics.cx) * z / intrinsics.fx
     y = (rows.astype(np.float32) - intrinsics.cy) * z / intrinsics.fy
     return np.stack([x, y, z], axis=1).astype(np.float32)
+
+
+def robust_filter_points(
+    points: np.ndarray,
+    *,
+    mad_scale: float = 4.5,
+    minimum_radius_m: float = 0.003,
+) -> np.ndarray:
+    """Remove spatial outliers using a median/MAD radial filter.
+
+    The median center is resistant to background pixels left by an imperfect
+    mask. A small metric floor prevents a nearly rigid depth patch from being
+    reduced to too few points by numerical noise.
+    """
+    points = np.asarray(points, dtype=np.float32)
+    if points.ndim != 2 or points.shape[1] != 3:
+        raise ValueError(f"points must be Nx3, got {points.shape}.")
+    if points.shape[0] < 4:
+        return points
+    center = np.median(points, axis=0)
+    distances = np.linalg.norm(points - center, axis=1)
+    median_distance = float(np.median(distances))
+    mad = float(np.median(np.abs(distances - median_distance)))
+    robust_sigma = 1.4826 * mad
+    radius = max(median_distance + mad_scale * robust_sigma, float(minimum_radius_m))
+    filtered = points[distances <= radius]
+    return filtered if filtered.shape[0] >= 3 else points
 
 
 def _normalize_quaternion_xyzw(quaternion: dict[str, float]) -> dict[str, float]:
@@ -253,7 +280,9 @@ def centroid_pose(points: np.ndarray) -> tuple[dict[str, float], dict[str, float
     """Estimate a pose from the masked point cloud centroid and PCA axes."""
     if points.size == 0:
         raise ValueError("Cannot estimate pose from an empty point cloud.")
-    centroid = np.mean(points, axis=0)
+    # Median is robust to residual table/background pixels left by box-driven
+    # segmentation. PCA still uses all retained points for shape orientation.
+    centroid = np.median(points, axis=0)
     axes, _, _ = _right_handed_principal_axes(points)
     translation = {"x": float(centroid[0]), "y": float(centroid[1]), "z": float(centroid[2])}
     quaternion = rotation_matrix_to_quaternion_xyzw(axes)
@@ -324,10 +353,11 @@ def estimate_pose_pca(points: np.ndarray) -> PoseEstimate:
     covariance = diagonal_covariance(points, orientation_stds_rad=orientation_stds)
     distances = np.linalg.norm(centered, axis=1)
     median_distance = float(np.median(distances)) if distances.size else 0.0
-    if median_distance <= 0.0:
-        inlier_ratio = 1.0
-    else:
-        inlier_ratio = float(np.mean(distances <= 3.0 * median_distance))
+    inlier_ratio = (
+        1.0
+        if median_distance <= 0.0
+        else float(np.mean(distances <= 3.0 * median_distance))
+    )
     residual_m = float(np.mean(distances)) if distances.size else 0.0
     confidence = max(0.0, min(shape_confidence * inlier_ratio, 1.0))
     return PoseEstimate(

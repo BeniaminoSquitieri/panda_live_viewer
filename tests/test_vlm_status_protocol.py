@@ -68,6 +68,17 @@ class VlmStatusProtocolTests(unittest.TestCase):
         self.assertIsNotNone(payload)
         self.assertEqual(payload["status"], STATUS_RUNNING)
         self.assertEqual(payload["message"], "WAIT_HUMAN: User must pour the ingredient.")
+        self.assertEqual(payload["semantic_status"], "UNKNOWN")
+        self.assertEqual(payload["control_action"], "REQUEST_HUMAN")
+
+    def test_success_has_explicit_semantic_and_control_contract(self):
+        payload = build_result_payload(
+            {"skill_name": "pick", "attempt_id": 2},
+            STATUS_SUCCESS,
+            "goal reached",
+        )
+        self.assertEqual(payload["semantic_status"], "SATISFIED")
+        self.assertEqual(payload["control_action"], "STOP_SUCCESS")
 
     def test_wait_human_maps_to_running_even_if_running_was_not_listed(self):
         payload = build_result_payload(

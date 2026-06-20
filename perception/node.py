@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
+from bt_planning.scene_facts import build_scene_facts_stub
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.duration import Duration
 from rclpy.node import Node
@@ -17,12 +18,12 @@ from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo, CompressedImage, Image
 from std_msgs.msg import String
-
-from bt_planning.scene_facts import build_scene_facts_stub
 from vlm_live.camera import decode_image
 from vlm_live.const import FRONT_TOPIC, WRIST_TOPIC
 
+from .contracts import enrich_fact_contract
 from .experiment_log import append_perception_event, build_perception_event
+from .fusion import fuse_camera_fact_sets
 from .geometry import (
     CameraIntrinsics,
     camera_info_to_intrinsics,
@@ -34,6 +35,8 @@ from .geometry import (
 )
 from .pipeline import PerceptionPipeline
 from .segmenters import SegmenterConfig, build_segmenter
+from .synchronization import ApproximateRgbdSynchronizer, SynchronizedRgbd
+from .tracking import TemporalObjectTracker
 
 try:
     from lerobot_bt_interfaces.srv import QueryObjectPose
@@ -58,6 +61,10 @@ class _CameraCache:
     intrinsics: CameraIntrinsics | None = None
     camera_info_stamp: float | None = None
     frame_id: str = ""
+    synced_rgb: np.ndarray | None = None
+    synced_depth: np.ndarray | None = None
+    synced_rgb_stamp: float | None = None
+    synced_depth_stamp: float | None = None
 
 
 class PerceptionNode(Node):
@@ -76,6 +83,16 @@ class PerceptionNode(Node):
         self.cameras = {
             name: _CameraCache(frame_id=name) for name in self.enabled_cameras
         }
+        self.synchronizers = {
+            name: ApproximateRgbdSynchronizer(max_delta_s=self.max_sync_delta_s)
+            for name in self.enabled_cameras
+        }
+        self.tracker = TemporalObjectTracker(
+            alpha=self.tracking_alpha,
+            association_distance_m=self.tracking_association_distance_m,
+            min_confirmations=self.tracking_min_confirmations,
+            max_lost_age_s=self.tracking_max_lost_age_s,
+        )
         self.pipeline = PerceptionPipeline(
             segmenter=build_segmenter(self.segmenter_config, self.registry),
             min_depth_points=self.min_depth_points,
@@ -104,7 +121,9 @@ class PerceptionNode(Node):
         self.declare_parameter("publish_period_s", 0.5)
         self.declare_parameter("max_sync_delta_s", 0.15)
         self.declare_parameter("target_frame_id", "base_link")
+        self.declare_parameter("calibration_id", "")
         self.declare_parameter("planner_registry_json", "")
+        self.declare_parameter("object_catalog_json", "")
         self.declare_parameter("segmenter_backend", "owlvit")
         self.declare_parameter("segmenter_model_path", "google/owlvit-base-patch32")
         self.declare_parameter("segmenter_score_threshold", 0.2)
@@ -119,6 +138,10 @@ class PerceptionNode(Node):
         self.declare_parameter("depth_scale_m", 0.001)
         self.declare_parameter("support_preferences_json", "")
         self.declare_parameter("support_radius_m", 0.0)
+        self.declare_parameter("tracking_alpha", 0.65)
+        self.declare_parameter("tracking_association_distance_m", 0.15)
+        self.declare_parameter("tracking_min_confirmations", 2)
+        self.declare_parameter("tracking_max_lost_age_s", 1.0)
 
     def _load_parameters(self) -> None:
         self.image_topics = {
@@ -138,7 +161,14 @@ class PerceptionNode(Node):
         self.publish_period_s = float(self.get_parameter("publish_period_s").value)
         self.max_sync_delta_s = float(self.get_parameter("max_sync_delta_s").value)
         self.target_frame_id = str(self.get_parameter("target_frame_id").value)
-        self.registry = self._load_registry(str(self.get_parameter("planner_registry_json").value))
+        self.calibration_id = str(self.get_parameter("calibration_id").value).strip()
+        object_catalog = str(self.get_parameter("object_catalog_json").value).strip()
+        legacy_registry = str(self.get_parameter("planner_registry_json").value).strip()
+        self.registry = self._load_registry(object_catalog or legacy_registry)
+        if not object_catalog and legacy_registry:
+            self.get_logger().warning(
+                "planner_registry_json is deprecated for perception; use object_catalog_json."
+            )
         self.segmenter_config = SegmenterConfig(
             backend=str(self.get_parameter("segmenter_backend").value),
             model_path=str(self.get_parameter("segmenter_model_path").value),
@@ -164,6 +194,16 @@ class PerceptionNode(Node):
             ).items()
         }
         self.support_radius_m = float(self.get_parameter("support_radius_m").value)
+        self.tracking_alpha = float(self.get_parameter("tracking_alpha").value)
+        self.tracking_association_distance_m = float(
+            self.get_parameter("tracking_association_distance_m").value
+        )
+        self.tracking_min_confirmations = int(
+            self.get_parameter("tracking_min_confirmations").value
+        )
+        self.tracking_max_lost_age_s = float(
+            self.get_parameter("tracking_max_lost_age_s").value
+        )
 
     def _init_tf(self) -> None:
         try:
@@ -183,7 +223,7 @@ class PerceptionNode(Node):
         if not raw_value.startswith(("{", "[")):
             path = os.path.expanduser(raw_value)
             if os.path.isfile(path):
-                with open(path, "r", encoding="utf-8") as handle:
+                with open(path, encoding="utf-8") as handle:
                     raw_value = handle.read().strip()
             else:
                 raise FileNotFoundError(
@@ -203,7 +243,7 @@ class PerceptionNode(Node):
         if not raw_value.startswith(("{", "[")):
             registry_path = os.path.expanduser(raw_value)
             if os.path.isfile(registry_path):
-                with open(registry_path, "r", encoding="utf-8") as handle:
+                with open(registry_path, encoding="utf-8") as handle:
                     raw_value = handle.read().strip()
             else:
                 raise FileNotFoundError(
@@ -286,6 +326,12 @@ class PerceptionNode(Node):
             cache.rgb_stamp = stamp
             if msg.header.frame_id:
                 cache.frame_id = msg.header.frame_id
+            synchronized = self.synchronizers[camera_name].add_rgb(
+                stamp=stamp,
+                value=frame,
+                frame_id=cache.frame_id,
+            )
+            self._store_synchronized(cache, synchronized)
 
     def _on_depth(self, msg: Image, camera_name: str) -> None:
         try:
@@ -300,6 +346,23 @@ class PerceptionNode(Node):
             cache.depth_stamp = stamp
             if msg.header.frame_id:
                 cache.frame_id = msg.header.frame_id
+            synchronized = self.synchronizers[camera_name].add_depth(
+                stamp=stamp,
+                value=depth,
+                frame_id=cache.frame_id,
+            )
+            self._store_synchronized(cache, synchronized)
+
+    @staticmethod
+    def _store_synchronized(cache: _CameraCache, synchronized: SynchronizedRgbd | None) -> None:
+        if synchronized is None:
+            return
+        cache.synced_rgb = synchronized.rgb
+        cache.synced_depth = synchronized.depth
+        cache.synced_rgb_stamp = synchronized.rgb_stamp
+        cache.synced_depth_stamp = synchronized.depth_stamp
+        if synchronized.frame_id:
+            cache.frame_id = synchronized.frame_id
 
     def _on_camera_info(self, msg: CameraInfo, camera_name: str) -> None:
         try:
@@ -319,10 +382,16 @@ class PerceptionNode(Node):
         with self.lock:
             return {
                 name: _CameraCache(
-                    rgb=None if cache.rgb is None else cache.rgb.copy(),
-                    rgb_stamp=cache.rgb_stamp,
-                    depth=None if cache.depth is None else cache.depth.copy(),
-                    depth_stamp=cache.depth_stamp,
+                    rgb=None
+                    if (cache.synced_rgb if cache.synced_rgb is not None else cache.rgb) is None
+                    else (cache.synced_rgb if cache.synced_rgb is not None else cache.rgb).copy(),
+                    rgb_stamp=cache.synced_rgb_stamp
+                    if cache.synced_rgb is not None
+                    else cache.rgb_stamp,
+                    depth=None
+                    if cache.synced_depth is None
+                    else cache.synced_depth.copy(),
+                    depth_stamp=cache.synced_depth_stamp,
                     intrinsics=cache.intrinsics,
                     camera_info_stamp=cache.camera_info_stamp,
                     frame_id=cache.frame_id,
@@ -441,6 +510,12 @@ class PerceptionNode(Node):
             facts=result.facts,
             warnings=warnings,
         )
+        for fact in result.facts.values():
+            enrich_fact_contract(fact, source_camera=camera_name)
+            if tf_available and self.calibration_id:
+                fact["calibration_id"] = self.calibration_id
+            elif tf_available and self.target_frame_id != source_frame_id:
+                fact.setdefault("warnings", []).append("calibration_id_missing")
         if self.perception_log_path:
             append_perception_event(
                 self.perception_log_path,
@@ -469,7 +544,7 @@ class PerceptionNode(Node):
 
     def _publish_scene_facts(self) -> None:
         snapshot = self._snapshot()
-        facts: dict[str, Any] = {}
+        camera_fact_sets: list[dict[str, Any]] = []
         warnings: list[str] = []
         tf_available_by_camera: dict[str, bool] = {}
 
@@ -477,7 +552,16 @@ class PerceptionNode(Node):
             camera_facts, camera_warnings, _, tf_available = self._run_camera(camera_name, cache)
             tf_available_by_camera[camera_name] = tf_available
             warnings.extend(f"{camera_name}:{warning}" for warning in camera_warnings)
-            self._merge_facts(facts, camera_facts, warnings)
+            camera_fact_sets.append(camera_facts)
+
+        facts = fuse_camera_fact_sets(camera_fact_sets)
+        valid_stamps = [
+            float(cache.rgb_stamp)
+            for cache in snapshot.values()
+            if cache.rgb_stamp is not None
+        ]
+        tracking_stamp = max(valid_stamps) if valid_stamps else time.time()
+        facts = self.tracker.update(facts, stamp=tracking_stamp)
 
         camera_details = {
             name: {
@@ -498,6 +582,11 @@ class PerceptionNode(Node):
             camera_details=camera_details,
             facts=facts,
             warnings=warnings,
+            metadata={
+                "target_frame_id": self.target_frame_id,
+                "calibration_id": self.calibration_id,
+                "object_catalog_source": "object_catalog_json",
+            },
         )
         with self.lock:
             self.latest_scene_facts = scene_facts

@@ -1,20 +1,20 @@
 """Scene facts helpers shared by planning and perception."""
 
-from typing import Any, Dict, Iterable, Mapping, Optional
-
+from collections.abc import Iterable, Mapping
+from typing import Any
 
 SCHEMA_VERSION = 1
 
 
 def _camera_frame(
     available: bool,
-    stamp: Optional[Any],
+    stamp: Any | None,
     *,
-    frame_id: Optional[str] = None,
-    depth_available: Optional[bool] = None,
-    camera_info_available: Optional[bool] = None,
-    tf_available: Optional[bool] = None,
-) -> Dict[str, Any]:
+    frame_id: str | None = None,
+    depth_available: bool | None = None,
+    camera_info_available: bool | None = None,
+    tf_available: bool | None = None,
+) -> dict[str, Any]:
     frame = {"available": bool(available)}
     if stamp is not None:
         frame["stamp"] = stamp
@@ -43,9 +43,9 @@ def build_object_pose_fact(
     pose_residual_m: float | None = None,
     inlier_ratio: float | None = None,
     warnings: Iterable[str] | None = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Build one per-object scene fact with explicit uncertainty fields."""
-    fact: Dict[str, Any] = {
+    fact: dict[str, Any] = {
         "name": name,
         "present": bool(present),
         "frame_id": frame_id,
@@ -72,12 +72,13 @@ def build_object_pose_fact(
 def build_scene_facts_stub(
     front_available: bool,
     wrist_available: bool,
-    timestamps: Optional[Mapping[str, Any]] = None,
+    timestamps: Mapping[str, Any] | None = None,
     *,
-    camera_details: Optional[Mapping[str, Mapping[str, Any]]] = None,
-    facts: Optional[Mapping[str, Any]] = None,
-    warnings: Optional[Iterable[str]] = None,
-) -> Dict[str, Any]:
+    camera_details: Mapping[str, Mapping[str, Any]] | None = None,
+    facts: Mapping[str, Any] | None = None,
+    warnings: Iterable[str] | None = None,
+    metadata: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     """Return a stable envelope for future scene extraction."""
     timestamps = timestamps or {}
     camera_details = camera_details or {}
@@ -97,4 +98,5 @@ def build_scene_facts_stub(
         },
         "facts": dict(facts or {}),
         "warnings": list(warnings or []),
+        "metadata": dict(metadata or {}),
     }

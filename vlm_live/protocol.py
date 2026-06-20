@@ -1,7 +1,7 @@
 """Protocol parsing and payload helpers for VLM request/result ROS messages."""
 
 import json
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from std_msgs.msg import String
@@ -12,15 +12,16 @@ from .const import (
     STATUS_WAIT_HUMAN,
     SUPPORTED_STATUSES,
 )
+from .contracts import semantic_contract_for_status
 
 
-def _normalize_statuses(value: Any) -> List[str]:
+def _normalize_statuses(value: Any) -> list[str]:
     """Normalize a list-like value into supported uppercase status tokens."""
     if not isinstance(value, list):
         return DEFAULT_ALLOWED_STATUSES.copy()
 
     allowed_set = set(SUPPORTED_STATUSES)
-    cleaned: List[str] = []
+    cleaned: list[str] = []
     for item in value:
         token = str(item).strip().upper()
         if not token or token in cleaned:
@@ -31,12 +32,12 @@ def _normalize_statuses(value: Any) -> List[str]:
     return cleaned or DEFAULT_ALLOWED_STATUSES.copy()
 
 
-def clean_statuses(value: Any) -> List[str]:
+def clean_statuses(value: Any) -> list[str]:
     """Return a normalized list of accepted status values."""
     return _normalize_statuses(value)
 
 
-def parse_request(msg: "String", logger) -> Optional[Dict[str, Any]]:
+def parse_request(msg: "String", logger) -> dict[str, Any] | None:
     """Validate and normalize the incoming JSON request message."""
     raw = msg.data.strip()
     if not raw:
@@ -87,24 +88,27 @@ def parse_request(msg: "String", logger) -> Optional[Dict[str, Any]]:
     }
 
 
-def build_result_payload(request: Dict[str, Any], status: str, reason: str) -> Optional[Dict[str, Any]]:
+def build_result_payload(request: dict[str, Any], status: str, reason: str) -> dict[str, Any] | None:
     """Build an outgoing VLM status payload from a normalized request."""
     skill_name = request.get("skill_name", "").strip()
     if not skill_name:
         return None
+    semantic_status, control_action = semantic_contract_for_status(status)
     status, reason = coerce_result_for_request(request, status, reason)
 
     payload = {
         "skill_name": skill_name,
         "attempt_id": request.get("attempt_id", 0),
         "status": status,
+        "semantic_status": str(semantic_status),
+        "control_action": str(control_action),
     }
     if reason:
         payload["message"] = reason
     return payload
 
 
-def coerce_result_for_request(request: Dict[str, Any], status: str, reason: str) -> tuple[str, str]:
+def coerce_result_for_request(request: dict[str, Any], status: str, reason: str) -> tuple[str, str]:
     """Map WAIT_HUMAN to RUNNING with a prefixed reason unless explicitly allowed."""
     allowed_statuses = request.get("allowed_statuses", DEFAULT_ALLOWED_STATUSES)
     allowed_statuses = clean_statuses(allowed_statuses)

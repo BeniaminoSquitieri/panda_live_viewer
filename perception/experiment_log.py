@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 import time
 from collections import OrderedDict
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 SCHEMA_VERSION = 1
 EVENT_TYPE_PERCEPTION = "perception"
@@ -21,8 +22,8 @@ def build_perception_event(
     warnings: list[str],
     detections_seen: int,
     latency_s: float | None = None,
-) -> "OrderedDict[str, object]":
-    event: "OrderedDict[str, object]" = OrderedDict()
+) -> OrderedDict[str, object]:
+    event: OrderedDict[str, object] = OrderedDict()
     event["schema_version"] = SCHEMA_VERSION
     event["event_type"] = EVENT_TYPE_PERCEPTION
     event["timestamp_unix_s"] = time.time()
@@ -31,6 +32,17 @@ def build_perception_event(
     event["stamp"] = stamp
     event["detections_seen"] = int(detections_seen)
     event["object_names"] = sorted(facts)
+    event["object_estimates"] = {
+        name: {
+            "observation_status": fact.get("observation_status"),
+            "pose_confidence": fact.get("pose_confidence"),
+            "track_id": fact.get("track_id"),
+            "confirmation_count": fact.get("confirmation_count"),
+            "source_cameras": fact.get("source_cameras", []),
+            "calibration_id": fact.get("calibration_id"),
+        }
+        for name, fact in sorted(facts.items())
+    }
     event["warnings"] = list(warnings)
     event["latency_s"] = latency_s
     return event

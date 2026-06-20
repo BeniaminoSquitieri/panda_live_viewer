@@ -232,6 +232,30 @@ verifier without the planning service.
 
 ## Perception Scene Facts
 
+### Responsibility boundary
+
+The perception node is the sole authority for metric observations: pose,
+covariance, frame, timestamps, tracking, source cameras, and geometry quality.
+It does not decide task completion. The VLM consumes a read-only summary and
+owns semantic predicates; it never creates or corrects coordinates. The BT
+server owns readiness policy and tree transitions.
+
+The current pipeline adds:
+
+- approximate RGB/depth timestamp pairing;
+- median/MAD point-cloud outlier filtering;
+- explicit observation states (`DETECTED_WITH_POSE`, `TENTATIVE`,
+  `TEMPORARILY_LOST`, `NOT_DETECTED`);
+- temporal track ids and confirmation counts;
+- covariance-weighted multi-camera fusion in a common frame;
+- calibration identity propagation;
+- separate VLM `semantic_status` and `control_action` fields while preserving
+  legacy `RUNNING/SUCCESS/FAILURE` payloads.
+
+Use `object_catalog_json` for perception labels and aliases.
+`planner_registry_json` remains a deprecated compatibility fallback; task order
+and BT skill semantics do not belong in metric perception.
+
 The passive RGB-D perception bridge can be run alongside the VLM node:
 
 ```bash
@@ -444,7 +468,7 @@ node lifts poses into `base_link` using these transforms.
 cd ~/panda_live_viewer
 python3 -m perception.cli \
   --ros-args \
-  -p planner_registry_json:='{"objects":[{"canonical_name":"cup","aliases":["mug"]}]}' \
+  -p object_catalog_json:=perception/registries/coffee_registry.json \
   -p segmenter_backend:=owlvit \
   -p require_query_pose_service:=true
 ```
