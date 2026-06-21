@@ -1,0 +1,32 @@
+{
+  "$comment": "SHARED VLM PROTOCOL — single source of truth for the VLM boundary between the two separate repos VLM-BT-BC and panda_live_viewer. Keep this file byte-for-byte identical in both repos (src/lerobot_bt_python/vlm/ and panda_live_viewer/vlm_live/). A coherence test in each repo asserts that the code matches this data. See docs/ros_contract.md. Bump schema_version only on a breaking change.",
+  "schema_version": 1,
+  "statuses": ["RUNNING", "SUCCESS", "FAILURE", "WAIT_HUMAN"],
+  "runtime_allowed_statuses": ["RUNNING", "SUCCESS", "FAILURE"],
+  "control_actions": ["KEEP_RUNNING", "STOP_SUCCESS", "STOP_UNSAFE", "REQUEST_HUMAN"],
+  "semantic_statuses": ["SATISFIED", "NOT_SATISFIED", "UNKNOWN", "ANOMALY"],
+
+  "status_to_semantic": {
+    "SUCCESS":    {"semantic": "SATISFIED",     "control_action": "STOP_SUCCESS"},
+    "FAILURE":    {"semantic": "ANOMALY",       "control_action": "STOP_UNSAFE"},
+    "WAIT_HUMAN": {"semantic": "UNKNOWN",       "control_action": "REQUEST_HUMAN"},
+    "RUNNING":    {"semantic": "NOT_SATISFIED", "control_action": "KEEP_RUNNING"},
+    "_default":   {"semantic": "UNKNOWN",       "control_action": "KEEP_RUNNING"}
+  },
+
+  "$comment_control_action_to_status": "How the BT runtime collapses a control_action back to a BT status. REQUEST_HUMAN currently degrades to RUNNING because the runtime does not list WAIT_HUMAN in runtime_allowed_statuses (documented asymmetry).",
+  "control_action_to_status": {
+    "KEEP_RUNNING": "RUNNING",
+    "REQUEST_HUMAN": "RUNNING",
+    "STOP_SUCCESS": "SUCCESS",
+    "STOP_UNSAFE": "FAILURE"
+  },
+
+  "next_action_to_status": {
+    "CONTINUE": "SUCCESS",
+    "PROCEED": "SUCCESS",
+    "RETRY": "FAILURE",
+    "RETRY_SKILL": "FAILURE",
+    "WAIT": "RUNNING"
+  }
+}

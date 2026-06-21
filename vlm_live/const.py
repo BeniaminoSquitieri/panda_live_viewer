@@ -6,6 +6,10 @@
 # checks are acceptable.
 MODEL_PATH = "/home/bsquitieri-iit.local/models/Qwen3-VL-32B-Instruct"
 
+# ROS CONTRACT with the separate VLM-BT-BC repo. These topic/service names and
+# the STATUS_* vocabulary below are a wire contract: VLM-BT-BC consumes them by
+# string. A rename here breaks the runtime silently. Mirror any change in
+# VLM-BT-BC (config.py / vlm/verification.py) and its docs/ros_contract.md.
 FRONT_TOPIC = "/panda/camera/front/image_compressed"
 WRIST_TOPIC = "/panda/camera/wrist/image_compressed"
 REQUEST_TOPIC = "/lerobot_bt/vlm_request"

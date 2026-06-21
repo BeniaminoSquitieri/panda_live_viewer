@@ -41,6 +41,7 @@ from .const import (
 from .camera import compose, decode_image
 from .camera import compose_front
 from .experiment_log import append_verifier_event, build_verifier_event
+from .decision import downgrade_uncertain_failure
 from .prompt import build_prompt, fit_status, format_scene_context
 from .protocol import build_result_payload, coerce_result_for_request, parse_request
 from .view import start_view
@@ -566,37 +567,17 @@ class VlmNode(Node):
             )
 
     def _downgrade_uncertain_failure(self, status: str, reason: str) -> tuple[str, str]:
-        """Treat visibility/uncertainty failures as non-terminal RUNNING."""
-        if status != STATUS_FAILURE:
-            return status, reason
+        """Treat visibility/uncertainty failures as non-terminal RUNNING.
 
-        reason_lower = (reason or "").lower()
-        uncertainty_markers = (
-            "not visible",
-            "not clearly visible",
-            "no clear evidence",
-            "not clear",
-            "unclear",
-            "cannot confirm",
-            "does not confirm",
-            "no definitive",
-            "insufficient",
-            "hard to see",
-            "occluded",
-            "possibly",
-            "appears",
-            "current frame",
-        )
-        if any(marker in reason_lower for marker in uncertainty_markers):
-            logger = self.get_logger() if self is not None else None
-            if logger is not None:
-                logger.warning(
-                    "Downgrading uncertain VLM FAILURE to RUNNING: "
-                    f"{reason}"
-                )
-            return STATUS_RUNNING, reason
-
-        return status, reason
+        Pure rule lives in ``decision.downgrade_uncertain_failure``; this method
+        only adds the ROS-side logging when a downgrade actually happens.
+        """
+        new_status, new_reason = downgrade_uncertain_failure(status, reason)
+        if new_status != status:
+            self.get_logger().warning(
+                f"Downgrading uncertain VLM FAILURE to RUNNING: {reason}"
+            )
+        return new_status, new_reason
 
     def _on_generate_plan(self, request, response):
         """Handle the planner service; dry_run must not invoke the VLM backend."""
