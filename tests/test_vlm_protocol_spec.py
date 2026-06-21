@@ -13,6 +13,10 @@ from vlm_live.contracts import ControlAction, SemanticStatus, semantic_contract_
 from vlm_live.protocol_spec import load_protocol_spec
 
 
+def test_protocol_schema_version_is_current() -> None:
+    assert load_protocol_spec()["schema_version"] == 2
+
+
 def test_supported_statuses_match_spec() -> None:
     spec = load_protocol_spec()
     assert set(SUPPORTED_STATUSES) == set(spec["statuses"])

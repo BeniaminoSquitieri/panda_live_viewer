@@ -1,4 +1,3 @@
-
 # Panda VLM Live Verifier & Planner (panda_live_viewer)
 
 ## Quick Start
@@ -77,6 +76,7 @@ VLM_CAMERA_VIEW=both ./run.sh
 ## Architecture & Roles
 
 **panda_live_viewer** (this repo):
+
 - Visual-side only: observes the real camera scene via ROS.
 - Can propose a Linear IR JSON plan at the start of an episode.
 - Does NOT generate BehaviorTree.CPP XML.
@@ -86,6 +86,7 @@ VLM_CAMERA_VIEW=both ./run.sh
 - May save debug planner outputs under `generated_plans/` (not for live integration).
 
 **lerobot** (external):
+
 - Owns validation, XML/YAML generation, and execution.
 - Sends `task_name` + `planner_registry_json` (and optionally `scene_facts_json`) to panda_live_viewer via ROS service `/lerobot_bt/generate_plan`.
 - Receives only Linear IR JSON as `plan_json`.
@@ -185,9 +186,9 @@ This allows dry-run planner service startup even when `qwen_vl_utils`,
 the `lerobot` ROS workspace before starting this node.
 
 Robot-day runbook: see the sibling checkout
-`~/lerobot/docs/runtime_bt_generation_robot_runbook.md` (or
-`../lerobot/docs/runtime_bt_generation_robot_runbook.md` when both repos share
-the same parent directory).
+`~/lerobot/docs/DEMO_FINALE_COMMANDS.md` (or
+`../lerobot/docs/DEMO_FINALE_COMMANDS.md` when both repos share the same parent
+directory).
 
 > WARNING: This repo does not generate XML/YAML. `lerobot` validates and
 > compiles.
@@ -285,7 +286,7 @@ The VLM **verifier** prompt is additionally enriched, read-only, with the
 metric object poses from `/perception/scene_facts`: when present, objects are
 listed as e.g. `- coffee_capsule: [0.684, -0.260, 0.150] m in base_link,
 confidence 0.62` under a `Perception scene facts (...)` block. This is one-way
-perception → VLM: the VLM only *reads* poses to ground its judgement and never
+perception → VLM: the VLM only _reads_ poses to ground its judgement and never
 produces coordinates; perception stays the single source of truth. Without
 scene facts the prompt is unchanged (no regression). See
 `vlm_live/prompt.py::format_scene_context`.
@@ -538,7 +539,6 @@ ros2 topic echo /perception/scene_facts > /tmp/scene_facts.log &
 - Do NOT use shared files for live integration; use the ROS service when available.
 - Do NOT commit generated plan artifacts unless intentionally adding examples.
 
-
 ## Linear IR Step Format
 
 - Each step in a Linear IR plan may contain only `kind`, `name`, `object`, and `objects`.
@@ -575,7 +575,6 @@ See `bt_planning/` for helpers to build prompts and parse Linear IR JSON plans.
 - Run compile check: `python3 -m compileall .`
 - Do not report `pytest` as passing unless it is installed and actually run.
 
-
 ## Dry-run Planner
 
 - The dry-run planner (`bt_planning/dry_run_plan.py`) is deterministic and for debug/integration testing.
@@ -598,6 +597,5 @@ See `bt_planning/` for helpers to build prompts and parse Linear IR JSON plans.
 - No BehaviorTree.CPP XML generation here.
 - Verifier behavior is not broken.
 - Tests or compile checks pass.
-
 
 # (Verifier usage and install/run instructions follow below)

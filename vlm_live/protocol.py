@@ -13,6 +13,9 @@ from .const import (
     SUPPORTED_STATUSES,
 )
 from .contracts import semantic_contract_for_status
+from .protocol_spec import load_protocol_spec
+
+PROTOCOL_SCHEMA_VERSION = int(load_protocol_spec()["schema_version"])
 
 
 def _normalize_statuses(value: Any) -> list[str]:
@@ -53,6 +56,17 @@ def parse_request(msg: "String", logger) -> dict[str, Any] | None:
         logger.warning("Ignoring VLM request that is not a JSON object")
         return None
 
+    raw_version = payload.get("protocol_schema_version")
+    if raw_version is not None:
+        try:
+            version = int(raw_version)
+        except (TypeError, ValueError):
+            logger.warning(f"Ignoring VLM request with invalid protocol schema {raw_version!r}")
+            return None
+        if version != PROTOCOL_SCHEMA_VERSION:
+            logger.warning(f"Ignoring VLM protocol schema {version}; expected {PROTOCOL_SCHEMA_VERSION}")
+            return None
+
     skill_name = str(payload.get("skill_name", "")).strip()
     if not skill_name:
         logger.warning("Ignoring VLM request with empty skill_name")
@@ -79,6 +93,7 @@ def parse_request(msg: "String", logger) -> dict[str, Any] | None:
             check_period_s = None
 
     return {
+        "protocol_schema_version": PROTOCOL_SCHEMA_VERSION,
         "skill_name": skill_name,
         "attempt_id": attempt_id,
         "message": message,
@@ -97,6 +112,7 @@ def build_result_payload(request: dict[str, Any], status: str, reason: str) -> d
     status, reason = coerce_result_for_request(request, status, reason)
 
     payload = {
+        "protocol_schema_version": PROTOCOL_SCHEMA_VERSION,
         "skill_name": skill_name,
         "attempt_id": request.get("attempt_id", 0),
         "status": status,

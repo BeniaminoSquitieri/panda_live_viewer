@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import pytest
-
 from vlm_live.const import STATUS_FAILURE, STATUS_RUNNING, STATUS_SUCCESS
 from vlm_live.decision import (
     UNCERTAINTY_MARKERS,
     downgrade_uncertain_failure,
+    is_terminal_gate_status,
     is_uncertain_reason,
 )
 
@@ -45,3 +45,10 @@ def test_non_failure_statuses_pass_through_untouched() -> None:
     # Even an uncertain reason must not change a non-FAILURE status.
     assert downgrade_uncertain_failure(STATUS_SUCCESS, "appears done") == (STATUS_SUCCESS, "appears done")
     assert downgrade_uncertain_failure(STATUS_RUNNING, "occluded") == (STATUS_RUNNING, "occluded")
+
+
+def test_only_success_closes_the_scene_gate() -> None:
+    assert is_terminal_gate_status("SUCCESS") is True
+    assert is_terminal_gate_status("RUNNING") is False
+    assert is_terminal_gate_status("FAILURE") is False
+    assert is_terminal_gate_status("WAIT_HUMAN") is False

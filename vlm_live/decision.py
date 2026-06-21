@@ -7,7 +7,7 @@ input/output, without constructing a ROS node. The node keeps the side effects
 
 from __future__ import annotations
 
-from .const import STATUS_FAILURE, STATUS_RUNNING
+from .const import STATUS_FAILURE, STATUS_RUNNING, STATUS_SUCCESS
 
 # Phrases in a VLM reason that indicate the model is *uncertain* rather than
 # observing a genuine anomaly. A FAILURE justified only by uncertainty is
@@ -48,3 +48,8 @@ def downgrade_uncertain_failure(status: str, reason: str) -> tuple[str, str]:
     if is_uncertain_reason(reason):
         return STATUS_RUNNING, reason
     return status, reason
+
+
+def is_terminal_gate_status(status: str) -> bool:
+    """Return whether a verifier status may close the active BT scene gate."""
+    return status == STATUS_SUCCESS

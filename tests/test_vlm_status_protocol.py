@@ -1,11 +1,58 @@
+import json
 import unittest
+from types import SimpleNamespace
 
 from vlm_live.const import STATUS_FAILURE, STATUS_RUNNING, STATUS_SUCCESS, STATUS_WAIT_HUMAN
 from vlm_live.prompt import build_prompt, extract_reason, fit_status, format_scene_context, parse_status
-from vlm_live.protocol import build_result_payload, clean_statuses
+from vlm_live.protocol import PROTOCOL_SCHEMA_VERSION, build_result_payload, clean_statuses, parse_request
+
+
+class _Logger:
+    def __init__(self):
+        self.messages = []
+
+    def warning(self, message):
+        self.messages.append(message)
 
 
 class VlmStatusProtocolTests(unittest.TestCase):
+    def test_request_and_result_carry_current_protocol_version(self):
+        logger = _Logger()
+        request = parse_request(
+            SimpleNamespace(
+                data=json.dumps(
+                    {
+                        "protocol_schema_version": PROTOCOL_SCHEMA_VERSION,
+                        "skill_name": "ingredient_poured",
+                        "attempt_id": 4,
+                    }
+                )
+            ),
+            logger,
+        )
+
+        self.assertIsNotNone(request)
+        self.assertEqual(request["protocol_schema_version"], PROTOCOL_SCHEMA_VERSION)
+        result = build_result_payload(request, STATUS_WAIT_HUMAN, "Please adjust the scene.")
+        self.assertEqual(result["protocol_schema_version"], PROTOCOL_SCHEMA_VERSION)
+
+    def test_explicit_incompatible_protocol_version_is_rejected(self):
+        logger = _Logger()
+        request = parse_request(
+            SimpleNamespace(
+                data=json.dumps(
+                    {
+                        "protocol_schema_version": PROTOCOL_SCHEMA_VERSION + 1,
+                        "skill_name": "ingredient_poured",
+                    }
+                )
+            ),
+            logger,
+        )
+
+        self.assertIsNone(request)
+        self.assertTrue(any("expected" in message for message in logger.messages))
+
     def test_reasoning_prompt_mentions_wait_human(self):
         prompt = build_prompt(
             {
@@ -49,7 +96,7 @@ class VlmStatusProtocolTests(unittest.TestCase):
         self.assertEqual(statuses, ["RUNNING", "WAIT_HUMAN"])
 
     def test_missing_allowed_statuses_default_to_lerobot_compatible_statuses(self):
-        self.assertEqual(clean_statuses(None), ["RUNNING", "SUCCESS", "FAILURE"])
+        self.assertEqual(clean_statuses(None), ["RUNNING", "SUCCESS", "FAILURE", "WAIT_HUMAN"])
 
     def test_fit_status_can_return_wait_human_when_it_is_only_allowed_status(self):
         self.assertEqual(fit_status("RUNNING", ["WAIT_HUMAN"]), "WAIT_HUMAN")

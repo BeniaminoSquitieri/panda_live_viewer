@@ -9,14 +9,14 @@ from typing import Callable, Optional, Tuple
 
 import numpy as np
 import rclpy
+from bt_planning.service_logic import build_generate_plan_response
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CompressedImage
 from std_msgs.msg import String
 
-from bt_planning.service_logic import build_generate_plan_response
-
+from .camera import compose, compose_front, decode_image
 from .const import (
     CHECK_PERIOD_SECONDS,
     DEFAULT_ALLOWED_STATUSES,
@@ -26,22 +26,18 @@ from .const import (
     MODEL_PATH,
     MODEL_SERVER_URL,
     PLANNER_MAX_NEW_TOKENS,
+    REQUEST_TOPIC,
+    RESULT_TOPIC,
     SCENE_FACTS_TOPIC,
-    STATUS_FAILURE,
     STATUS_RUNNING,
-    STATUS_SUCCESS,
     STATUS_WAIT_HUMAN,
     VIEW_FPS,
     VIEW_HOST,
     VIEW_PORT,
-    REQUEST_TOPIC,
-    RESULT_TOPIC,
     WRIST_TOPIC,
 )
-from .camera import compose, decode_image
-from .camera import compose_front
+from .decision import downgrade_uncertain_failure, is_terminal_gate_status
 from .experiment_log import append_verifier_event, build_verifier_event
-from .decision import downgrade_uncertain_failure
 from .prompt import build_prompt, fit_status, format_scene_context
 from .protocol import build_result_payload, coerce_result_for_request, parse_request
 from .view import start_view
@@ -645,21 +641,15 @@ class VlmNode(Node):
                 error_message=error_message,
             )
 
-            if status in (STATUS_SUCCESS, STATUS_WAIT_HUMAN):
+            if is_terminal_gate_status(status):
                 with self.lock:
                     if self.req_id == request_id:
                         self.req = None
                 self.wake.clear()
             else:
-                # RUNNING and FAILURE are both non-terminal here: the BT gate
-                # node converts a FAILURE verdict into RUNNING and keeps the
-                # gate open, polling for a fresh verdict. If we stopped
-                # re-evaluating on FAILURE the gate would keep reading the same
-                # stale verdict forever and never react to the scene changing
-                # (e.g. the human finally placing the cup). So keep inferring
-                # on the same attempt and honor the per-request re-check cadence
-                # (robot skills request a much faster cadence than human gates
-                # so the robot stops as soon as the scene confirms completion).
+                # RUNNING, FAILURE and WAIT_HUMAN are non-terminal. Keep
+                # re-evaluating the same attempt so a human correction can turn
+                # the scene verdict into SUCCESS without restarting the BT.
                 request_period = request.get("check_period_s")
                 wait_s = self.check_s if request_period is None else request_period
                 self.wake.wait(timeout=wait_s)
