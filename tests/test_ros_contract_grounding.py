@@ -7,7 +7,7 @@ class RosContractGroundingTests(unittest.TestCase):
     """Pin this repo's side of the grounding ROS contract.
 
     The wire string is shared by VLM-BT-BC (bt_generation/nl_grounding_client.py
-    GROUND_INSTRUCTION_SERVICE) and documented in docs/ros_contract.md. A rename
+    GROUND_INSTRUCTION_SERVICE) and documented in docs/VLM_BT_BC_ARCHITETTURA.md. A rename
     here fails silently at runtime, so this test must go red on drift; update both
     repos and the contract doc together.
     """

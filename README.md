@@ -186,8 +186,8 @@ This allows dry-run planner service startup even when `qwen_vl_utils`,
 the `lerobot` ROS workspace before starting this node.
 
 Robot-day runbook: see the sibling checkout
-`~/lerobot/docs/DEMO_FINALE_COMMANDS.md` (or
-`../lerobot/docs/DEMO_FINALE_COMMANDS.md` when both repos share the same parent
+`~/lerobot/docs/VLM_BT_BC_COMANDI.md` (or
+`../lerobot/docs/VLM_BT_BC_COMANDI.md` when both repos share the same parent
 directory).
 
 > WARNING: This repo does not generate XML/YAML. `lerobot` validates and

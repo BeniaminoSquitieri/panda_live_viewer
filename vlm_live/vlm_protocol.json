@@ -1,5 +1,5 @@
 {
-  "$comment": "SHARED VLM PROTOCOL — single source of truth for the VLM boundary between the two separate repos VLM-BT-BC and panda_live_viewer. Keep this file byte-for-byte identical in both repos (src/lerobot_bt_python/vlm/ and panda_live_viewer/vlm_live/). A coherence test in each repo asserts that the code matches this data. See docs/ros_contract.md. Bump schema_version only on a breaking change.",
+  "$comment": "SHARED VLM PROTOCOL — single source of truth for the VLM boundary between the two separate repos VLM-BT-BC and panda_live_viewer. Keep this file byte-for-byte identical in both repos (src/lerobot_bt_python/vlm/ and panda_live_viewer/vlm_live/). A coherence test in each repo asserts that the code matches this data. See docs/VLM_BT_BC_ARCHITETTURA.md. Bump schema_version only on a breaking change.",
   "schema_version": 2,
   "statuses": ["RUNNING", "SUCCESS", "FAILURE", "WAIT_HUMAN"],
   "runtime_allowed_statuses": ["RUNNING", "SUCCESS", "FAILURE", "WAIT_HUMAN"],

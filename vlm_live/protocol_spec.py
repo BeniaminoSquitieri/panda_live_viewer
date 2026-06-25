@@ -4,7 +4,7 @@ The JSON file next to this module is the single source of truth for the VLM
 boundary and is kept byte-for-byte identical in the VLM-BT-BC repo. This loader
 exposes it as data; a coherence test asserts that the hand-written contracts in
 ``contracts.py`` / ``const.py`` match the spec, so the two repos cannot drift
-apart silently. See the VLM-BT-BC docs/ros_contract.md.
+apart silently. See the VLM-BT-BC docs/VLM_BT_BC_ARCHITETTURA.md.
 """
 
 from __future__ import annotations
