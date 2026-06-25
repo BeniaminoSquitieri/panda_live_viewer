@@ -15,6 +15,7 @@ WRIST_TOPIC = "/panda/camera/wrist/image_compressed"
 REQUEST_TOPIC = "/lerobot_bt/vlm_request"
 RESULT_TOPIC = "/lerobot_bt/vlm_result"
 GENERATE_PLAN_SERVICE = "/lerobot_bt/generate_plan"
+GROUND_INSTRUCTION_SERVICE = "/lerobot_bt/ground_instruction"
 SCENE_FACTS_TOPIC = "/perception/scene_facts"
 
 CHECK_PERIOD_SECONDS = 1.0

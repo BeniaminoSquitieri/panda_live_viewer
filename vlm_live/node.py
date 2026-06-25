@@ -9,6 +9,7 @@ from typing import Callable, Optional, Tuple
 
 import numpy as np
 import rclpy
+from bt_planning.grounding_service_logic import build_ground_instruction_response
 from bt_planning.service_logic import build_generate_plan_response
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.node import Node
@@ -22,6 +23,7 @@ from .const import (
     DEFAULT_ALLOWED_STATUSES,
     FRONT_TOPIC,
     GENERATE_PLAN_SERVICE,
+    GROUND_INSTRUCTION_SERVICE,
     MAX_NEW_TOKENS,
     MODEL_PATH,
     MODEL_SERVER_URL,
@@ -47,6 +49,11 @@ try:
 except ImportError:
     GenerateTaskPlan = None
 
+try:
+    from lerobot_bt_interfaces.srv import GroundInstruction
+except ImportError:
+    GroundInstruction = None
+
 
 @dataclass(frozen=True)
 class NodeConfig:
@@ -58,6 +65,7 @@ class NodeConfig:
     req_topic: str
     res_topic: str
     plan_service: str
+    ground_service: str
     check_s: float
     reasoning: bool
     log_out: bool
@@ -92,6 +100,7 @@ class VlmNode(Node):
         self.req_topic = cfg.req_topic
         self.res_topic = cfg.res_topic
         self.plan_service = cfg.plan_service
+        self.ground_service = cfg.ground_service
         self.check_s = cfg.check_s
         self.reasoning = cfg.reasoning
         self.log_out = cfg.log_out
@@ -135,6 +144,7 @@ class VlmNode(Node):
         self.declare_parameter("vlm_request_topic", REQUEST_TOPIC)
         self.declare_parameter("vlm_result_topic", RESULT_TOPIC)
         self.declare_parameter("generate_plan_service", GENERATE_PLAN_SERVICE)
+        self.declare_parameter("ground_instruction_service", GROUND_INSTRUCTION_SERVICE)
         self.declare_parameter("check_period_seconds", CHECK_PERIOD_SECONDS)
         self.declare_parameter("include_reasoning", True)
         self.declare_parameter("log_model_output", True)
@@ -174,6 +184,7 @@ class VlmNode(Node):
             req_topic=req_topic,
             res_topic=res_topic,
             plan_service=self.get_parameter("generate_plan_service").value,
+            ground_service=self.get_parameter("ground_instruction_service").value,
             check_s=float(self.get_parameter("check_period_seconds").value),
             reasoning=bool(self.get_parameter("include_reasoning").value),
             log_out=bool(self.get_parameter("log_model_output").value),
@@ -262,6 +273,20 @@ class VlmNode(Node):
                 self.plan_service,
                 self._on_generate_plan,
                 callback_group=self.callback_group,
+            )
+
+        self.ground_instruction_srv = None
+        if GroundInstruction is not None:
+            self.ground_instruction_srv = self.create_service(
+                GroundInstruction,
+                self.ground_service,
+                self._on_ground_instruction,
+                callback_group=self.callback_group,
+            )
+        else:
+            self.get_logger().warning(
+                "GroundInstruction service type is unavailable; "
+                f"{self.ground_service} was not created. Rebuild/source lerobot_bt_interfaces."
             )
 
     def _plan_service_status(self) -> str:
@@ -601,6 +626,29 @@ class VlmNode(Node):
             )
         return response
 
+
+    def _on_ground_instruction(self, request, response):
+        """Handle the grounding service; returns the RAW VLM response, unparsed."""
+        result = build_ground_instruction_response(
+            nl_instruction=request.nl_instruction,
+            grounding_payload_json=request.grounding_payload_json,
+            last_error_json=request.last_error_json,
+            vlm_backend=self._run_planner_vlm,
+        )
+
+        response.success = result.success
+        response.raw_response = result.raw_response
+        response.error_message = result.error_message
+        if result.success:
+            self.get_logger().info(
+                f"Grounded instruction {request.nl_instruction!r} (raw response returned)"
+            )
+        else:
+            self.get_logger().error(
+                f"GroundInstruction failed for instruction {request.nl_instruction!r}:\n"
+                f"{result.error_message}"
+            )
+        return response
 
     def _evaluation_loop(self) -> None:
         while rclpy.ok() and not self.stop.is_set():
