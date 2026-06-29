@@ -145,7 +145,7 @@ class VlmNode(Node):
         self.declare_parameter("max_new_tokens", MAX_NEW_TOKENS)
         self.declare_parameter("planner_dry_run", False)
         self.declare_parameter("planner_max_new_tokens", PLANNER_MAX_NEW_TOKENS)
-        # Robot-day dry-run should keep this true; eager loading is only for live VLM warm-up.
+        # The real-robot dry-run should keep this true; eager loading is only for live VLM warm-up.
         self.declare_parameter("lazy_load_model", False)
         # Fail fast when lerobot's GenerateTaskPlan interface was not sourced.
         self.declare_parameter("require_generate_plan_service", True)
@@ -185,13 +185,9 @@ class VlmNode(Node):
             planner_dry_run=bool(self.get_parameter("planner_dry_run").value),
             planner_max_tokens=max(1, int(self.get_parameter("planner_max_new_tokens").value)),
             lazy_load_model=bool(self.get_parameter("lazy_load_model").value),
-            require_generate_plan_service=bool(
-                self.get_parameter("require_generate_plan_service").value
-            ),
+            require_generate_plan_service=bool(self.get_parameter("require_generate_plan_service").value),
             scene_facts_topic=str(self.get_parameter("scene_facts_topic").value),
-            verifier_experiment_log_path=str(
-                self.get_parameter("verifier_experiment_log_path").value
-            ),
+            verifier_experiment_log_path=str(self.get_parameter("verifier_experiment_log_path").value),
             model_server_url=str(self.get_parameter("model_server_url").value).strip(),
             disable_model_load=bool(self.get_parameter("disable_model_load").value),
             vlm_camera_view=str(self.get_parameter("vlm_camera_view").value).strip().lower(),
@@ -292,7 +288,9 @@ class VlmNode(Node):
             raise
         return load_model_fn, run_inference_fn, run_text_inference_fn
 
-    def _model_backend(self) -> tuple[Callable[..., tuple], Callable[..., tuple[str, str]], Callable[..., str]]:
+    def _model_backend(
+        self,
+    ) -> tuple[Callable[..., tuple], Callable[..., tuple[str, str]], Callable[..., str]]:
         if self._model_backend_cache is None:
             self._model_backend_cache = self._import_model_backend()
         return self._model_backend_cache
@@ -386,9 +384,7 @@ class VlmNode(Node):
             self.req = request
             self.req_id += 1
 
-        self.get_logger().info(
-            f"VLM request: {request['skill_name']}#{request['attempt_id']}"
-        )
+        self.get_logger().info(f"VLM request: {request['skill_name']}#{request['attempt_id']}")
         self._publish_result(request, STATUS_RUNNING, "VLM processing")
         self.wake.set()
 
@@ -453,10 +449,7 @@ class VlmNode(Node):
             )
         except Exception:
             # Logging must never break the verification loop.
-            self.get_logger().error(
-                "Failed to write verifier experiment event:\n"
-                f"{traceback.format_exc()}"
-            )
+            self.get_logger().error(f"Failed to write verifier experiment event:\n{traceback.format_exc()}")
 
     def _start_viewer(self) -> None:
         start_view(
@@ -570,9 +563,7 @@ class VlmNode(Node):
         """
         new_status, new_reason = downgrade_uncertain_failure(status, reason)
         if new_status != status:
-            self.get_logger().warning(
-                f"Downgrading uncertain VLM FAILURE to RUNNING: {reason}"
-            )
+            self.get_logger().warning(f"Downgrading uncertain VLM FAILURE to RUNNING: {reason}")
         return new_status, new_reason
 
     def _on_generate_plan(self, request, response):
@@ -590,17 +581,14 @@ class VlmNode(Node):
         response.error_message = result.error_message
         if result.success:
             self.get_logger().info(
-                f"Generated Linear IR plan for task {request.task_name!r} "
-                f"(dry_run={self.planner_dry_run})"
+                f"Generated Linear IR plan for task {request.task_name!r} (dry_run={self.planner_dry_run})"
             )
         else:
             # result.error_message already contains the traceback from service_logic
             self.get_logger().error(
-                f"GenerateTaskPlan failed for task {request.task_name!r}:\n"
-                f"{result.error_message}"
+                f"GenerateTaskPlan failed for task {request.task_name!r}:\n{result.error_message}"
             )
         return response
-
 
     def _evaluation_loop(self) -> None:
         while rclpy.ok() and not self.stop.is_set():

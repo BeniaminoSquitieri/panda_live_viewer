@@ -133,6 +133,10 @@ class PerceptionNode(Node):
         self.declare_parameter("perception_log_path", "")
         self.declare_parameter("require_query_pose_service", True)
         self.declare_parameter("enabled_cameras", ["front", "wrist"])
+        # Fixed external camera whose image centroids feed the spatial-prior gate.
+        # Only this camera's image_centroid is published (the wrist camera moves,
+        # so its centroids are not comparable to the offline priors).
+        self.declare_parameter("external_camera_key", "front")
         self.declare_parameter("pose_max_depth_m", 0.0)
         self.declare_parameter("pose_depth_band_m", 0.0)
         self.declare_parameter("depth_scale_m", 0.001)
@@ -184,6 +188,7 @@ class PerceptionNode(Node):
         self.enabled_cameras = valid or ["front", "wrist"]
         if self.enabled_cameras != ["front", "wrist"]:
             self.get_logger().info(f"Perception restricted to cameras: {self.enabled_cameras}")
+        self.external_camera_key = str(self.get_parameter("external_camera_key").value).strip() or "front"
         self.pose_max_depth_m = float(self.get_parameter("pose_max_depth_m").value)
         self.pose_depth_band_m = float(self.get_parameter("pose_depth_band_m").value)
         self.depth_scale_m = float(self.get_parameter("depth_scale_m").value)
@@ -510,8 +515,16 @@ class PerceptionNode(Node):
             facts=result.facts,
             warnings=warnings,
         )
+        is_external_camera = camera_name == self.external_camera_key
         for fact in result.facts.values():
             enrich_fact_contract(fact, source_camera=camera_name)
+            # Only the fixed external camera contributes an image centroid to the
+            # spatial-prior gate; stamp it with the camera so the gate can match
+            # it against the per-object prior. Drop it from any other camera.
+            if is_external_camera and isinstance(fact.get("image_centroid"), dict):
+                fact["image_centroid"]["camera_key"] = camera_name
+            else:
+                fact.pop("image_centroid", None)
             if tf_available and self.calibration_id:
                 fact["calibration_id"] = self.calibration_id
             elif tf_available and self.target_frame_id != source_frame_id:

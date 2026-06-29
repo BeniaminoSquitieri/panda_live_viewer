@@ -108,6 +108,23 @@ def _distance(a: tuple[float, float, float], b: tuple[float, float, float]) -> f
     )
 
 
+def normalized_image_centroid(mask: np.ndarray) -> tuple[float, float] | None:
+    """Normalized (u, v) centroid of a boolean instance mask, or None if empty.
+
+    Returns (mean_x / width, mean_y / height) in [0, 1]. This MUST match the
+    convention used offline in `fit_image_object_priors.normalized_centroid` so
+    that the spatial-prior gate compares like with like.
+    """
+    array = np.asarray(mask)
+    if array.ndim != 2 or array.size == 0:
+        return None
+    height, width = array.shape
+    ys, xs = np.nonzero(array)
+    if xs.size == 0:
+        return None
+    return float(xs.mean() / width), float(ys.mean() / height)
+
+
 class PerceptionPipeline:
     """RGB-D perception pipeline with explicit uncertainty and safe fallbacks."""
 
@@ -231,6 +248,11 @@ class PerceptionPipeline:
                 else ObservationStatus.DETECTED_NO_POSE
             )
             fact["geometry_quality"] = confidence
+            # Normalized image centroid for the image-space spatial-prior gate.
+            # Available even without depth, since it is derived from the 2D mask.
+            image_centroid = normalized_image_centroid(detection.mask)
+            if image_centroid is not None:
+                fact["image_centroid"] = {"u": image_centroid[0], "v": image_centroid[1]}
             enrich_fact_contract(fact)
             quality = (1 if has_pose else 0, confidence, float(detection.score))
             candidates.setdefault(canonical_name, []).append(

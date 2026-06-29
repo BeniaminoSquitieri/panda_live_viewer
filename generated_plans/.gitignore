@@ -1,4 +1,4 @@
-raw_model_responses/*
+raw_planner_responses/*
 linear_ir/*
 !README.md
 !.gitkeep

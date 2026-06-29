@@ -56,18 +56,34 @@ def fuse_object_facts(observations: list[dict[str, Any]]) -> dict[str, Any]:
     if not observations:
         raise ValueError("observations must not be empty.")
     observations = [dict(item) for item in observations]
+
+    # The image centroid for the spatial-prior gate comes from a single fixed
+    # external camera, so carry it through fusion regardless of which observation
+    # wins the metric pose contest (which may be the moving wrist camera).
+    image_centroid = next(
+        (dict(item["image_centroid"]) for item in observations if isinstance(item.get("image_centroid"), Mapping)),
+        None,
+    )
+
+    def _finalize(fact: dict[str, Any]) -> dict[str, Any]:
+        if image_centroid is not None:
+            fact["image_centroid"] = image_centroid
+        elif "image_centroid" in fact:
+            fact.pop("image_centroid", None)
+        return enrich_fact_contract(fact)
+
     posed = [item for item in observations if _translation(item) is not None]
     if not posed:
         chosen = max(observations, key=lambda item: float(item.get("pose_confidence", 0.0)))
         sources = sorted({source for item in observations for source in item.get("source_cameras", []) or []})
         chosen["source_cameras"] = sources
-        return enrich_fact_contract(chosen)
+        return _finalize(chosen)
 
     frames = {str(item.get("frame_id") or "") for item in posed}
     if len(frames) != 1:
         chosen = max(posed, key=lambda item: float(item.get("pose_confidence", 0.0)))
         chosen.setdefault("warnings", []).append("fusion_frame_mismatch")
-        return enrich_fact_contract(chosen)
+        return _finalize(chosen)
 
     weighted: list[tuple[np.ndarray, np.ndarray, dict[str, Any]]] = []
     for item in posed:
@@ -110,7 +126,7 @@ def fuse_object_facts(observations: list[dict[str, Any]]) -> dict[str, Any]:
         {source for item in observations for source in item.get("source_cameras", []) or []}
     )
     result["stamp"] = max(float(item.get("stamp", 0.0) or 0.0) for item in observations)
-    return enrich_fact_contract(result)
+    return _finalize(result)
 
 
 def fuse_camera_fact_sets(fact_sets: Iterable[Mapping[str, dict[str, Any]]]) -> dict[str, Any]:

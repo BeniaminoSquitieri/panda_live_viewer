@@ -185,7 +185,7 @@ This allows dry-run planner service startup even when `qwen_vl_utils`,
 `lerobot_bt_interfaces/srv/GenerateTaskPlan` is unavailable; source and build
 the `lerobot` ROS workspace before starting this node.
 
-Robot-day runbook: see the sibling checkout
+Execution on real robot runbook: see the sibling checkout
 `~/lerobot/docs/DEMO_FINALE_COMMANDS.md` (or
 `../lerobot/docs/DEMO_FINALE_COMMANDS.md` when both repos share the same parent
 directory).
@@ -301,7 +301,12 @@ availability plus a segmenter warning instead of invented object poses.
 When detections are available, depth is back-projected with `CameraInfo`, object
 orientation is estimated from point-cloud PCA, pose confidence/covariance are
 emitted, and missing or stale RGB-D/TF data degrades the fact instead of
-fabricating geometry. `require_query_pose_service` defaults to true so the node
+fabricating geometry. Each fact also carries an `image_centroid` `{u, v,
+camera_key}` — the object's normalized image centroid from the fixed external
+camera (`external_camera_key`, default `front`) — which the lerobot image-space
+spatial-prior gate consumes. It is derived from the 2D mask, so it is present
+even without depth; the moving wrist camera does not emit it.
+`require_query_pose_service` defaults to true so the node
 fails fast when `QueryObjectPose.srv` has not been rebuilt and sourced.
 
 ## ROS 2 / CycloneDDS environment
@@ -350,10 +355,10 @@ python -m pytest tests/test_vlm_status_protocol.py tests/test_baseline_prompts.p
                  tests/test_plan_parser.py tests/test_service_logic.py \
                  tests/test_verifier_experiment_log.py -q
 
-# lerobot — spatial-prior gate (30) + camera_static_tf_map publisher (5)
+# lerobot — image-space spatial-prior gate + camera publisher
 cd ~/lerobot
-python -m pytest src/lerobot_bt_python/test_spatial_prior.py \
-                 src/lerobot_bt_python/test_camera_publisher.py -q
+python -m pytest tests/lerobot_bt/test_perception_spatial_prior.py \
+                 tests/lerobot_bt/test_perception_camera_publisher.py -q
 
 # lerobot — offline gate smoke test (PASS / FAIL / ABSTAIN, exit 0)
 python scripts/smoke_spatial_prior_gate.py
@@ -378,7 +383,7 @@ python -m pytest tests/lerobot_bt -q   # BT generation, safety, contracts
 ### C. Hardware end-to-end (LOCAL robot machine only)
 
 The RGB-D perception path needs the real cameras, so it runs on the local robot
-machine: see "Robot-Day Step-by-Step Testing" steps 2–8 below (camera topics,
+machine: see "Execution on Real Robot Step-by-Step Testing" steps 2–8 below (camera topics,
 static TF, perception node, `scene_facts`, `query_pose`, metric sanity).
 
 ### D. Live VLM / verifier (GPU server only)
@@ -397,7 +402,7 @@ With the perception node up locally and the VLM node up on the server, confirm
 the one-way flow: `/perception/scene_facts` published locally is consumed by the
 VLM node (planner injection + read-only verifier enrichment). See step 9 below.
 
-## Robot-Day Step-by-Step Testing
+## Execution on Real Robot Step-by-Step Testing
 
 End-to-end smoke test for the RGB-D perception path on the real robot (category
 **C** above). Run the steps in order; do not skip the verification command at
@@ -456,8 +461,10 @@ node lifts poses into `base_link` using these transforms.
 > Camera extrinsic = single source of truth. The base→camera transform comes
 > **only** from `camera_static_tf_map` in the lerobot executor YAML (broadcast
 > by `camera_publisher`); perception just listens. If those transforms are
-> missing, perception returns camera-frame poses and the spatial-prior gate
-> ABSTAINs (`frame_mismatch`) — the correct, safe behaviour. To calibrate, run
+> missing, perception returns camera-frame 3D poses (used by the VLM/scene
+> consumers). The image-space spatial-prior gate is unaffected: it compares each
+> object's normalized image centroid on the fixed external camera, not its 3D
+> pose, so it does not depend on the base→camera TF. To calibrate, run
 > `scripts/calibrate_camera_extrinsics.py --input corr.json` (rigid
 > Kabsch/Umeyama fit of camera↔base correspondences; prints a ready-to-paste
 > `camera_static_tf_map` block and the residual RMS). Do **not** hand-invent
@@ -584,7 +591,7 @@ See `bt_planning/` for helpers to build prompts and parse Linear IR JSON plans.
 ## Folder Structure
 
 - `generated_plans/`: Debug planner outputs only
-  - `raw_model_responses/`
+  - `raw_planner_responses/`
   - `linear_ir/`
 - `bt_planning/`: Prompt and parser helpers
 
