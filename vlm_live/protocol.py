@@ -22,16 +22,7 @@ def _normalize_statuses(value: Any) -> list[str]:
     """Normalize a list-like value into supported uppercase status tokens."""
     if not isinstance(value, list):
         return DEFAULT_ALLOWED_STATUSES.copy()
-
-    allowed_set = set(SUPPORTED_STATUSES)
-    cleaned: list[str] = []
-    for item in value:
-        token = str(item).strip().upper()
-        if not token or token in cleaned:
-            continue
-        if token not in allowed_set:
-            continue
-        cleaned.append(token)
+    cleaned = list(dict.fromkeys(token for item in value if (token := str(item).strip().upper()) in SUPPORTED_STATUSES))
     return cleaned or DEFAULT_ALLOWED_STATUSES.copy()
 
 
@@ -108,8 +99,8 @@ def build_result_payload(request: dict[str, Any], status: str, reason: str) -> d
     skill_name = request.get("skill_name", "").strip()
     if not skill_name:
         return None
-    semantic_status, control_action = semantic_contract_for_status(status)
     status, reason = coerce_result_for_request(request, status, reason)
+    semantic_status, control_action = semantic_contract_for_status(status)
 
     payload = {
         "protocol_schema_version": PROTOCOL_SCHEMA_VERSION,
@@ -126,15 +117,10 @@ def build_result_payload(request: dict[str, Any], status: str, reason: str) -> d
 
 def coerce_result_for_request(request: dict[str, Any], status: str, reason: str) -> tuple[str, str]:
     """Map WAIT_HUMAN to RUNNING with a prefixed reason unless explicitly allowed."""
-    allowed_statuses = request.get("allowed_statuses", DEFAULT_ALLOWED_STATUSES)
-    allowed_statuses = clean_statuses(allowed_statuses)
-    if status == STATUS_WAIT_HUMAN and STATUS_WAIT_HUMAN not in allowed_statuses:
-        return STATUS_RUNNING, _wait_human_reason(reason)
-    return status, reason
+    allowed = clean_statuses(request.get("allowed_statuses", DEFAULT_ALLOWED_STATUSES))
+    return (STATUS_RUNNING, _wait_human_reason(reason)) if status == STATUS_WAIT_HUMAN and status not in allowed else (status, reason)
 
 
 def _wait_human_reason(reason: str) -> str:
     text = str(reason or "").strip()
-    if text:
-        return f"WAIT_HUMAN: {text}"
-    return "WAIT_HUMAN: human intervention requested"
+    return f"WAIT_HUMAN: {text or 'human intervention requested'}"

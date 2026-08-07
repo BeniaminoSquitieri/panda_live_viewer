@@ -33,28 +33,25 @@ class ApproximateRgbdSynchronizer:
         self._depth: deque[tuple[float, Any, str]] = deque(maxlen=queue_size)
 
     def add_rgb(self, *, stamp: float | None, value: Any, frame_id: str) -> SynchronizedRgbd | None:
-        if stamp is None:
-            return None
-        self._rgb.append((float(stamp), value, frame_id))
-        return self._match()
+        return self._add(self._rgb, stamp, value, frame_id)
 
     def add_depth(self, *, stamp: float | None, value: Any, frame_id: str) -> SynchronizedRgbd | None:
+        return self._add(self._depth, stamp, value, frame_id)
+
+    def _add(self, queue: deque[tuple[float, Any, str]], stamp: float | None, value: Any, frame_id: str) -> SynchronizedRgbd | None:
         if stamp is None:
             return None
-        self._depth.append((float(stamp), value, frame_id))
+        queue.append((float(stamp), value, frame_id))
         return self._match()
 
     def _match(self) -> SynchronizedRgbd | None:
         if not self._rgb or not self._depth:
             return None
-        best: tuple[float, int, int] | None = None
-        for rgb_index, (rgb_stamp, _, _) in enumerate(self._rgb):
-            for depth_index, (depth_stamp, _, _) in enumerate(self._depth):
-                candidate = (abs(rgb_stamp - depth_stamp), rgb_index, depth_index)
-                if best is None or candidate < best:
-                    best = candidate
-        assert best is not None
-        delta, rgb_index, depth_index = best
+        delta, rgb_index, depth_index = min(
+            (abs(rgb[0] - depth[0]), rgb_index, depth_index)
+            for rgb_index, rgb in enumerate(self._rgb)
+            for depth_index, depth in enumerate(self._depth)
+        )
         if delta > self.max_delta_s:
             return None
         rgb_stamp, rgb, rgb_frame = self._rgb[rgb_index]

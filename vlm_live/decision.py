@@ -43,11 +43,7 @@ def downgrade_uncertain_failure(status: str, reason: str) -> tuple[str, str]:
     responsible for logging when a downgrade happens (compare the returned
     status with the input to detect it).
     """
-    if status != STATUS_FAILURE:
-        return status, reason
-    if is_uncertain_reason(reason):
-        return STATUS_RUNNING, reason
-    return status, reason
+    return (STATUS_RUNNING, reason) if status == STATUS_FAILURE and is_uncertain_reason(reason) else (status, reason)
 
 
 def is_terminal_gate_status(status: str) -> bool:

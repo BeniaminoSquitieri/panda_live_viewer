@@ -44,10 +44,9 @@ The request message is a JSON object stored in the `data` field of
 | `allowed_statuses` | `list[string]` | No | Status values accepted by the caller; invalid values are ignored |
 | `check_period_s` | `float` | No | Per-request re-check cadence (seconds) for non-final statuses; overrides `check_period_seconds`. Robot skills send `0.0` (re-check as fast as inference allows); omit for human gates |
 Only `skill_name` is required. Missing or invalid optional fields are normalized
-by `vlm_live/protocol.py`. The current `lerobot` runtime publishes
-`RUNNING`/`SUCCESS`/`FAILURE` only; `WAIT_HUMAN` is an opt-in extension and is
-valid only when the incoming request explicitly includes it in
-`allowed_statuses`.
+by `vlm_live/protocol.py`. The current `lerobot` runtime explicitly allows all
+four statuses, including `WAIT_HUMAN`. The fallback coercion remains for older
+callers that do not include it in `allowed_statuses`.
 
 ## Response Format
 
@@ -75,14 +74,13 @@ The VLM server publishes a JSON object on `/lerobot_bt/vlm_result`.
 |--------|----------------------|----------------|
 | `RUNNING` | BT waits | The VLM is still processing or the scene is inconclusive |
 | `SUCCESS` | BT advances | The requested condition is fully satisfied |
-| `FAILURE` | BT retries/fails the skill | The requested condition is clearly not satisfied |
-| `WAIT_HUMAN` | Published only if the caller allows it | Explicit human intervention, action, or decision is required |
+| `FAILURE` | BT waits by default, or fails the leaf when configured | The requested condition is clearly not satisfied |
+| `WAIT_HUMAN` | BT waits and requests operator correction | Explicit human intervention, action, or decision is required |
 
-`lerobot` currently rejects `WAIT_HUMAN` in the Python verifier store and the
-C++ `GetSkillVerification` polling node handles only `RUNNING`, `SUCCESS`, and
-`FAILURE`. When the VLM proposes `WAIT_HUMAN` for a request whose
-`allowed_statuses` does not include it, `panda_live_viewer` publishes
-`RUNNING` instead and prefixes the explanation with `WAIT_HUMAN: `.
+`lerobot` accepts `WAIT_HUMAN` in the verifier store and the C++ polling nodes
+keep the gate active. When the VLM proposes it for an older request whose
+`allowed_statuses` does not include it, `panda_live_viewer` publishes `RUNNING`
+instead and prefixes the explanation with `WAIT_HUMAN: `.
 
 ## Runtime Behavior
 
@@ -99,8 +97,9 @@ C++ `GetSkillVerification` polling node handles only `RUNNING`, `SUCCESS`, and
    cadence is used instead (e.g. robot skills send `0.0` to re-check the scene
    as fast as inference allows, while human gates omit it and keep the slower
    node default).
-7. `SUCCESS`, `FAILURE`, and allowed `WAIT_HUMAN` clear the active request.
-   A mapped `WAIT_HUMAN` remains `RUNNING` and keeps the request active.
+7. Only `SUCCESS` clears the active request. `RUNNING`, `FAILURE`, and allowed
+   `WAIT_HUMAN` remain active and are reevaluated; a mapped `WAIT_HUMAN` is
+   published as `RUNNING` for backward compatibility and also remains active.
 
 ## Example Commands
 

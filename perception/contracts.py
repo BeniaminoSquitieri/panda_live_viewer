@@ -8,6 +8,13 @@ from enum import StrEnum
 from typing import Any
 
 
+def _optional(value: Any, convert) -> Any | None:
+    try:
+        return None if value is None else convert(value)
+    except (TypeError, ValueError):
+        return None
+
+
 class ObservationStatus(StrEnum):
     """Quality/state vocabulary owned by metric perception."""
 
@@ -50,25 +57,15 @@ class ObjectEstimate:
             status = ObservationStatus(raw_status)
         except ValueError:
             status = ObservationStatus.DETECTED_NO_POSE
-        stamp = fact.get("stamp")
-        try:
-            normalized_stamp = None if stamp is None else float(stamp)
-        except (TypeError, ValueError):
-            normalized_stamp = None
-        track_id = fact.get("track_id")
-        try:
-            normalized_track_id = None if track_id is None else int(track_id)
-        except (TypeError, ValueError):
-            normalized_track_id = None
         return cls(
             object_id=str(fact.get("name") or ""),
             status=status,
             frame_id=str(fact.get("frame_id") or ""),
-            stamp=normalized_stamp,
+            stamp=_optional(fact.get("stamp"), float),
             pose=fact.get("pose") if isinstance(fact.get("pose"), Mapping) else None,
             covariance=tuple(float(value) for value in fact.get("covariance", []) or []),
             confidence=max(0.0, min(float(fact.get("pose_confidence", 0.0)), 1.0)),
-            track_id=normalized_track_id,
+            track_id=_optional(fact.get("track_id"), int),
             confirmation_count=max(0, int(fact.get("confirmation_count", 0))),
             source_cameras=tuple(str(value) for value in fact.get("source_cameras", []) or []),
             warnings=tuple(str(value) for value in fact.get("warnings", []) or []),

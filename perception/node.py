@@ -164,7 +164,7 @@ class PerceptionNode(Node):
         self.calibration_id = str(self.get_parameter("calibration_id").value).strip()
         object_catalog = str(self.get_parameter("object_catalog_json").value).strip()
         legacy_registry = str(self.get_parameter("planner_registry_json").value).strip()
-        self.registry = self._load_registry(object_catalog or legacy_registry)
+        self.registry = self._load_json_param(object_catalog or legacy_registry)
         if not object_catalog and legacy_registry:
             self.get_logger().warning(
                 "planner_registry_json is deprecated for perception; use object_catalog_json."
@@ -234,26 +234,6 @@ class PerceptionNode(Node):
             raise ValueError("JSON parameter must be a JSON object.")
         return payload
 
-    @staticmethod
-    def _load_registry(raw_value: str) -> dict[str, Any]:
-        raw_value = (raw_value or "").strip()
-        if not raw_value:
-            return {}
-        # Accept either a path to a JSON file or an inline JSON object string.
-        if not raw_value.startswith(("{", "[")):
-            registry_path = os.path.expanduser(raw_value)
-            if os.path.isfile(registry_path):
-                with open(registry_path, encoding="utf-8") as handle:
-                    raw_value = handle.read().strip()
-            else:
-                raise FileNotFoundError(
-                    f"planner_registry_json '{registry_path}' is not a file and is not inline JSON."
-                )
-        payload = json.loads(raw_value)
-        if not isinstance(payload, dict):
-            raise ValueError("planner_registry_json must be a JSON object.")
-        return payload
-
     def _init_ros_interfaces(self) -> None:
         self.camera_subscriptions = []
         for camera_name in self.enabled_cameras:
@@ -310,9 +290,7 @@ class PerceptionNode(Node):
         self.publish_timer = self.create_timer(self.publish_period_s, self._publish_scene_facts)
 
     def _query_service_status(self) -> str:
-        if self.query_pose_srv is None:
-            return "disabled"
-        return self.query_pose_service
+        return "disabled" if self.query_pose_srv is None else self.query_pose_service
 
     def _on_rgb(self, msg: CompressedImage, camera_name: str) -> None:
         frame = decode_image(msg)
@@ -408,9 +386,7 @@ class PerceptionNode(Node):
         return cache.depth
 
     def _lookup_transform(self, source_frame_id: str) -> Any | None:
-        if not self.target_frame_id or not source_frame_id or self.target_frame_id == source_frame_id:
-            return None
-        if self.tf_buffer is None:
+        if not self.target_frame_id or not source_frame_id or self.target_frame_id == source_frame_id or self.tf_buffer is None:
             return None
         try:
             return self.tf_buffer.lookup_transform(
@@ -436,19 +412,10 @@ class PerceptionNode(Node):
 
         tf_translation = transform.transform.translation
         tf_rotation = transform.transform.rotation
-        q_tf = {
-            "x": float(tf_rotation.x),
-            "y": float(tf_rotation.y),
-            "z": float(tf_rotation.z),
-            "w": float(tf_rotation.w),
-        }
+        q_tf = {key: float(getattr(tf_rotation, key)) for key in "xyzw"}
         translation = {key: float(value) for key, value in pose["translation"].items()}
         rotated = rotate_vector_xyzw(translation, q_tf)
-        pose["translation"] = {
-            "x": rotated["x"] + float(tf_translation.x),
-            "y": rotated["y"] + float(tf_translation.y),
-            "z": rotated["z"] + float(tf_translation.z),
-        }
+        pose["translation"] = {key: rotated[key] + float(getattr(tf_translation, key)) for key in "xyz"}
         pose["quaternion_xyzw"] = quaternion_multiply_xyzw(
             q_tf,
             {key: float(value) for key, value in pose["quaternion_xyzw"].items()},
@@ -531,17 +498,6 @@ class PerceptionNode(Node):
             )
         return result.facts, warnings, result.detections_seen, tf_available
 
-    @staticmethod
-    def _merge_facts(existing: dict[str, Any], incoming: dict[str, Any], warnings: list[str]) -> None:
-        for name, fact in incoming.items():
-            current = existing.get(name)
-            if current is None:
-                existing[name] = fact
-                continue
-            warnings.append(f"ambiguous_multiple_camera_observations:{name}")
-            if float(fact.get("pose_confidence", 0.0)) > float(current.get("pose_confidence", 0.0)):
-                existing[name] = fact
-
     def _publish_scene_facts(self) -> None:
         snapshot = self._snapshot()
         camera_fact_sets: list[dict[str, Any]] = []
@@ -555,12 +511,7 @@ class PerceptionNode(Node):
             camera_fact_sets.append(camera_facts)
 
         facts = fuse_camera_fact_sets(camera_fact_sets)
-        valid_stamps = [
-            float(cache.rgb_stamp)
-            for cache in snapshot.values()
-            if cache.rgb_stamp is not None
-        ]
-        tracking_stamp = max(valid_stamps) if valid_stamps else time.time()
+        tracking_stamp = max((float(cache.rgb_stamp) for cache in snapshot.values() if cache.rgb_stamp is not None), default=time.time())
         facts = self.tracker.update(facts, stamp=tracking_stamp)
 
         camera_details = {
@@ -611,26 +562,17 @@ class PerceptionNode(Node):
     def _on_query_pose(self, request: Any, response: Any) -> Any:
         object_name = str(getattr(request, "object_name", "")).strip()
         if not object_name:
-            response.success = False
-            response.pose_json = ""
-            response.error_message = "object_name is required."
-            return response
+            return self._query_error(response, "object_name is required.")
 
         with self.lock:
             scene_facts = None if self.latest_scene_facts is None else dict(self.latest_scene_facts)
 
         if scene_facts is None:
-            response.success = False
-            response.pose_json = ""
-            response.error_message = "No scene facts have been published yet."
-            return response
+            return self._query_error(response, "No scene facts have been published yet.")
 
         fact = dict(scene_facts.get("facts", {}).get(object_name) or {})
         if not fact or not fact.get("present") or "pose" not in fact:
-            response.success = False
-            response.pose_json = json.dumps(fact) if fact else ""
-            response.error_message = f"No usable pose for object {object_name!r}."
-            return response
+            return self._query_error(response, f"No usable pose for object {object_name!r}.", json.dumps(fact) if fact else "")
 
         if bool(getattr(request, "require_fresh", False)):
             stamp = stamp_to_float(fact.get("stamp"))
@@ -638,17 +580,18 @@ class PerceptionNode(Node):
             now = self.get_clock().now()
             now_s = stamp_to_float(now.to_msg())
             if stamp is None or now_s is None or max_age_s <= 0.0:
-                response.success = False
-                response.pose_json = json.dumps(fact, sort_keys=True)
-                response.error_message = "Freshness requested but pose stamp or max_age_s is invalid."
-                return response
+                return self._query_error(response, "Freshness requested but pose stamp or max_age_s is invalid.", json.dumps(fact, sort_keys=True))
             if now_s - stamp > max_age_s:
-                response.success = False
-                response.pose_json = json.dumps(fact, sort_keys=True)
-                response.error_message = f"Pose for {object_name!r} is older than {max_age_s:.3f}s."
-                return response
+                return self._query_error(response, f"Pose for {object_name!r} is older than {max_age_s:.3f}s.", json.dumps(fact, sort_keys=True))
 
         response.success = True
         response.pose_json = json.dumps(fact, sort_keys=True)
         response.error_message = ""
+        return response
+
+    @staticmethod
+    def _query_error(response: Any, message: str, pose_json: str = "") -> Any:
+        response.success = False
+        response.pose_json = pose_json
+        response.error_message = message
         return response

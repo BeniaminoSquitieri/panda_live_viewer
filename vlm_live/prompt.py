@@ -2,7 +2,7 @@
 
 import json
 import re
-from typing import Any, Dict, List
+from typing import Any
 
 from .const import (
     DEFAULT_ALLOWED_STATUSES,
@@ -37,7 +37,7 @@ def format_scene_context(scene_facts_json: str) -> str:
     if not isinstance(facts, dict) or not facts:
         return ""
 
-    lines: List[str] = []
+    lines: list[str] = []
     for name, fact in sorted(facts.items()):
         if not isinstance(fact, dict) or not fact.get("present"):
             continue
@@ -60,12 +60,10 @@ def format_scene_context(scene_facts_json: str) -> str:
         else:
             lines.append(f"- {name}: present (no metric pose)")
 
-    if not lines:
-        return ""
     return "\n".join(lines)
 
 
-def build_prompt(request: Dict[str, Any], reasoning: bool) -> str:
+def build_prompt(request: dict[str, Any], reasoning: bool) -> str:
     """Build the textual instruction for the VLM."""
     message = request.get("message") or "No additional context."
     task_text = request.get("task") or ""
@@ -74,19 +72,14 @@ def build_prompt(request: Dict[str, Any], reasoning: bool) -> str:
     camera_view = str(request.get("camera_view") or "front").strip().lower()
     status_spec = "|".join(allowed_statuses)
     status_text = ", ".join(allowed_statuses)
-    wait_human_instruction = ""
-    if STATUS_WAIT_HUMAN in allowed_statuses:
-        wait_human_instruction = (
-            "Choose WAIT_HUMAN when explicit human intervention, a human action, or a human decision is required.\n"
-        )
+    wait_human_instruction = "Choose WAIT_HUMAN when explicit human intervention, a human action, or a human decision is required.\n" if STATUS_WAIT_HUMAN in allowed_statuses else ""
     task_line = f"Task description: {task_text}\n" if task_text else ""
-    scene_context_block = ""
-    if scene_context:
-        scene_context_block = (
-            "Perception scene facts (metric object poses measured by the depth "
-            "pipeline; use only as spatial context, do not invent coordinates):\n"
-            f"{scene_context}\n"
-        )
+    scene_context_block = (
+        "Perception scene facts (metric object poses measured by the depth pipeline; use only as spatial context, do not invent coordinates):\n"
+        f"{scene_context}\n"
+        if scene_context
+        else ""
+    )
     if camera_view == "both":
         camera_instruction = (
             "The image shows two camera views side by side: the LEFT half is the fixed 'Front camera' and the RIGHT half is the moving 'Wrist camera' mounted on the gripper.\n"
@@ -110,6 +103,12 @@ def build_prompt(request: Dict[str, Any], reasoning: bool) -> str:
         f"{scene_context_block}"
         f"BT message: {message}\n"
     )
+    decision_rules = (
+        wait_human_instruction
+        + "Choose SUCCESS only when the condition is fully satisfied.\n"
+        + "Choose RUNNING when evidence is insufficient or the condition is not yet satisfied.\n"
+        + "Choose FAILURE only for an explicit, irreversible wrong outcome. If an object is unclear, occluded, hard to see, or temporarily not visible, choose RUNNING."
+    )
 
     if reasoning:
         return (
@@ -117,20 +116,10 @@ def build_prompt(request: Dict[str, Any], reasoning: bool) -> str:
             + "\nReturn two fields only:\n"
             + f"STATUS=<{status_spec}>\n"
             + "REASON=<short explanation; may span multiple lines>\n"
-            + wait_human_instruction
-            + "Choose SUCCESS only when the condition is fully satisfied.\n"
-            + "Choose RUNNING when evidence is insufficient or the condition is not yet satisfied.\n"
-            + "Choose FAILURE only for an explicit, irreversible wrong outcome. If an object is unclear, occluded, hard to see, or temporarily not visible, choose RUNNING."
+            + decision_rules
         )
 
-    return (
-        common_header
-        + f"\nReturn exactly one token: {status_text}.\n"
-        + wait_human_instruction
-        + "Choose SUCCESS only when the condition is fully satisfied.\n"
-        + "Choose RUNNING when evidence is insufficient or the condition is not yet satisfied.\n"
-        + "Choose FAILURE only for an explicit, irreversible wrong outcome. If an object is unclear, occluded, hard to see, or temporarily not visible, choose RUNNING."
-    )
+    return common_header + f"\nReturn exactly one token: {status_text}.\n" + decision_rules
 
 
 def extract_reason(text: str) -> str:
@@ -181,27 +170,27 @@ def parse_status(text: str) -> str:
     return STATUS_RUNNING
 
 
-def fit_status(status: str, allowed_statuses: List[str]) -> str:
+def fit_status(status: str, allowed_statuses: list[str]) -> str:
     """Map the model verdict into one of the requested allowed statuses."""
-    if status in allowed_statuses:
-        return status
-    if STATUS_RUNNING in allowed_statuses:
-        return STATUS_RUNNING
-    if STATUS_FAILURE in allowed_statuses:
-        return STATUS_FAILURE
-    if STATUS_SUCCESS in allowed_statuses:
-        return STATUS_SUCCESS
-    if STATUS_WAIT_HUMAN in allowed_statuses:
-        return STATUS_WAIT_HUMAN
-    if allowed_statuses:
-        return allowed_statuses[0]
-    return STATUS_RUNNING
+    fallback = allowed_statuses[0] if allowed_statuses else STATUS_RUNNING
+    return next((value for value in (status, STATUS_RUNNING, STATUS_FAILURE, STATUS_SUCCESS, STATUS_WAIT_HUMAN) if value in allowed_statuses), fallback)
 
 
-def _allowed_statuses_for_prompt(request: Dict[str, Any]) -> List[str]:
+def _allowed_statuses_for_prompt(request: dict[str, Any]) -> list[str]:
     raw_statuses = request.get("allowed_statuses")
     if not isinstance(raw_statuses, list):
         return DEFAULT_ALLOWED_STATUSES.copy()
     normalized = {str(status).strip().upper() for status in raw_statuses}
     allowed = [status for status in SUPPORTED_STATUSES if status in normalized]
     return allowed or DEFAULT_ALLOWED_STATUSES.copy()
+
+
+def parse_verdict(text: str) -> tuple[str, str]:
+    """Return a normalized status and reason."""
+    return parse_status(text), extract_reason(text) if text else "Empty model output."
+
+
+def log_response(text: str, logger) -> None:
+    """Log a normalized model response."""
+    status, reason = parse_status(text), extract_reason(text)
+    logger.info(f"VLM response: STATUS={status}" + (f" REASON={reason}" if reason else ""))

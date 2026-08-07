@@ -8,13 +8,13 @@ set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+LEROBOT_ROOT="${LEROBOT_ROOT:-$(dirname "$PROJECT_DIR")}"
 
-LEROBOT_SETUP="/home/bsquitieri-iit.local/lerobot/install/setup.bash"
-MODEL_PATH="/home/bsquitieri-iit.local/models/Qwen3-VL-32B-Instruct"
+LEROBOT_SETUP="${LEROBOT_SETUP:-$LEROBOT_ROOT/install/setup.bash}"
+MODEL_PATH="${MODEL_PATH:-${VLM_MODEL_PATH:-Qwen/Qwen3-VL-32B-Instruct}}"
 SOCKET_PATH="${SOCKET_PATH:-$PROJECT_DIR/runtime/vlm_server.sock}"
 
-# shellcheck disable=SC1090
-source "$LEROBOT_SETUP"
+if [ -f "$LEROBOT_SETUP" ]; then source "$LEROBOT_SETUP"; else echo "[model_server] ROS setup not found; continuing because the socket server is ROS-free."; fi
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 

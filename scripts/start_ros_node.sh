@@ -4,11 +4,14 @@
 
 set -eo pipefail
 
-LEROBOT_SETUP="/home/bsquitieri-iit.local/lerobot/install/setup.bash"
-PROJECT_DIR="$(dirname "$(dirname "${BASH_SOURCE[0]}")")"
+PROJECT_DIR="$(cd "$(dirname "$(dirname "${BASH_SOURCE[0]}")")" && pwd)"
+LEROBOT_ROOT="${LEROBOT_ROOT:-$(dirname "$PROJECT_DIR")}"
+LEROBOT_SETUP="${LEROBOT_SETUP:-$LEROBOT_ROOT/install/setup.bash}"
 SOCKET_PATH="${SOCKET_PATH:-$PROJECT_DIR/runtime/vlm_server.sock}"
-VERIFIER_LOG="/home/bsquitieri/lerobot/generated_bt/experiments/verifier_events.jsonl"
+VERIFIER_LOG="${VERIFIER_LOG:-$LEROBOT_ROOT/generated_bt/experiments/verifier_events.jsonl}"
+VLM_CAMERA_VIEW="${VLM_CAMERA_VIEW:-front}"
 
+[ -f "$LEROBOT_SETUP" ] || { echo "[ros_node] ERROR: ROS workspace setup not found: $LEROBOT_SETUP"; exit 1; }
 # shellcheck disable=SC1090
 source "$LEROBOT_SETUP"
 
@@ -31,6 +34,4 @@ fi
 
 cd "$PROJECT_DIR"
 
-exec python3 -u -m vlm_live.cli \
-    --ros-args \
-    -p model_server_url:="$SOCKET_PATH" \
+exec python3 -u -m vlm_live.cli --ros-args -p model_server_url:="$SOCKET_PATH" -p lazy_load_model:=true -p vlm_camera_view:="$VLM_CAMERA_VIEW" -p planner_dry_run:=false -p require_generate_plan_service:=true -p verifier_experiment_log_path:="$VERIFIER_LOG" "$@"

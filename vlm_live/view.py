@@ -2,7 +2,7 @@
 
 import threading
 import time
-from typing import Callable, Optional, Tuple
+from typing import Callable
 
 import numpy as np
 import rclpy
@@ -61,7 +61,7 @@ VIEWER_HTML = """
 """
 
 
-def start_view(get_frames: Callable[[], Tuple[Optional[np.ndarray], Optional[np.ndarray]]], scene_fn: Callable[[], Optional[np.ndarray]], stop_event: threading.Event, host: str, port: int, fps: float, logger) -> None:
+def start_view(get_frames: Callable[[], tuple[np.ndarray | None, np.ndarray | None]], scene_fn: Callable[[], np.ndarray | None], stop_event: threading.Event, host: str, port: int, fps: float, logger) -> None:
     """Start the optional browser viewer in a daemon thread."""
     try:
         from flask import Flask, Response, render_template_string
@@ -91,10 +91,7 @@ def start_view(get_frames: Callable[[], Tuple[Optional[np.ndarray], Optional[np.
 
             ok, jpg = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
             if ok:
-                yield (
-                    b"--frame\r\n"
-                    b"Content-Type: image/jpeg\r\n\r\n" + jpg.tobytes() + b"\r\n"
-                )
+                yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + jpg.tobytes() + b"\r\n"
 
             time.sleep(frame_s)
 
@@ -104,22 +101,12 @@ def start_view(get_frames: Callable[[], Tuple[Optional[np.ndarray], Optional[np.
 
     @app.route("/stream/<camera_name>")
     def stream(camera_name):
-        if camera_name not in ("front", "wrist", "composed"):
+        if camera_name not in {"front", "wrist", "composed"}:
             return "Unknown camera", 404
         return Response(
             generate_stream(camera_name),
             mimetype="multipart/x-mixed-replace; boundary=frame",
         )
 
-    def run_app():
-        app.run(
-            host=host,
-            port=port,
-            threaded=True,
-            debug=False,
-            use_reloader=False,
-        )
-
-    thread = threading.Thread(target=run_app, daemon=True)
-    thread.start()
+    threading.Thread(target=lambda: app.run(host=host, port=port, threaded=True, debug=False, use_reloader=False), daemon=True).start()
     logger.info(f"Viewer running on http://{host}:{port}")

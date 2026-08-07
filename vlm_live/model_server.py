@@ -50,62 +50,26 @@ def _decode_image_b64(b64: str) -> np.ndarray:
 
 def _handle_request(payload: dict) -> dict:
     cmd = payload.get("cmd")
-
     if cmd == "health":
         return {"ok": True, "model_loaded": _model is not None}
-
-    if cmd == "infer":
-        from .model import run_inference
-
-        try:
-            scene = _decode_image_b64(payload["image_b64"])
-        except Exception as exc:
-            return {"ok": False, "error": f"image decode failed: {exc}"}
-
-        try:
-            with _inference_lock:
-                status, reason = run_inference(
-                    scene=scene,
-                    prompt=payload.get("prompt", ""),
-                    processor=_processor,
-                    model=_model,
-                    device=_device,
-                    tokens=int(payload.get("tokens", 64)),
-                    reasoning=bool(payload.get("reasoning", True)),
-                    log_out=bool(payload.get("log_out", False)),
-                    logger=log,
-                )
-            return {"ok": True, "status": status, "reason": reason}
-        except Exception as exc:
-            log.error(f"infer failed: {exc}")
-            return {"ok": False, "error": str(exc)}
-
-    if cmd == "text_infer":
-        from .model import run_text_inference
-
-        try:
-            scene = _decode_image_b64(payload["image_b64"])
-        except Exception as exc:
-            return {"ok": False, "error": f"image decode failed: {exc}"}
-
-        try:
-            with _inference_lock:
-                text = run_text_inference(
-                    scene=scene,
-                    prompt=payload.get("prompt", ""),
-                    processor=_processor,
-                    model=_model,
-                    device=_device,
-                    tokens=int(payload.get("tokens", 512)),
-                    log_out=bool(payload.get("log_out", False)),
-                    logger=log,
-                )
-            return {"ok": True, "text": text}
-        except Exception as exc:
-            log.error(f"text_infer failed: {exc}")
-            return {"ok": False, "error": str(exc)}
-
-    return {"ok": False, "error": f"unknown command: {cmd!r}"}
+    if cmd not in {"infer", "text_infer"}:
+        return {"ok": False, "error": f"unknown command: {cmd!r}"}
+    from . import model
+    try:
+        scene = _decode_image_b64(payload["image_b64"])
+    except Exception as exc:
+        return {"ok": False, "error": f"image decode failed: {exc}"}
+    kwargs = dict(scene=scene, prompt=payload.get("prompt", ""), processor=_processor, model=_model, device=_device, log_out=bool(payload.get("log_out", False)), logger=log)
+    try:
+        with _inference_lock:
+            if cmd == "infer":
+                status, reason = model.run_inference(tokens=int(payload.get("tokens", 64)), reasoning=bool(payload.get("reasoning", True)), **kwargs)
+                return {"ok": True, "status": status, "reason": reason}
+            text = model.run_text_inference(tokens=int(payload.get("tokens", 512)), **kwargs)
+        return {"ok": True, "text": text}
+    except Exception as exc:
+        log.error(f"{cmd} failed: {exc}")
+        return {"ok": False, "error": str(exc)}
 
 
 class _Handler(socketserver.StreamRequestHandler):
@@ -146,6 +110,7 @@ def main():
     _load(args.model_path)
 
     # Remove stale socket file if present
+    os.makedirs(os.path.dirname(os.path.abspath(args.socket_path)), exist_ok=True)
     if os.path.exists(args.socket_path):
         os.unlink(args.socket_path)
 
@@ -169,4 +134,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

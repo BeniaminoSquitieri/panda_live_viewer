@@ -1,14 +1,37 @@
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
 from perception.geometry import (
     CameraIntrinsics,
     back_project_mask,
+    decode_depth_image,
     estimate_pose_pca,
     quaternion_multiply_xyzw,
     rotate_covariance_6x6_xyzw,
     rotate_vector_xyzw,
 )
+
+
+def _depth_msg(data, *, encoding="16UC1", width=2, height=1, step=4, big_endian=False):
+    return SimpleNamespace(encoding=encoding, width=width, height=height, step=step, is_bigendian=big_endian, data=data)
+
+
+def test_decode_depth_image_handles_row_padding():
+    data = np.array([1, 2], dtype="<u2").tobytes() + b"\xaa\xbb" + np.array([3, 4], dtype="<u2").tobytes() + b"\xcc\xdd"
+    np.testing.assert_array_equal(decode_depth_image(_depth_msg(data, height=2, step=6)), [[1, 2], [3, 4]])
+
+
+def test_decode_depth_image_handles_big_endian_values():
+    expected = np.array([[1.25, 2.5]], dtype=np.float32)
+    msg = _depth_msg(expected.astype(">f4").tobytes(), encoding="32FC1", step=8, big_endian=True)
+    np.testing.assert_allclose(decode_depth_image(msg), expected)
+
+
+def test_decode_depth_image_rejects_short_rows():
+    with pytest.raises(ValueError, match="step"):
+        decode_depth_image(_depth_msg(b"\x00\x01", step=2))
 
 
 def test_back_project_mask_uses_intrinsics_and_depth_scale():

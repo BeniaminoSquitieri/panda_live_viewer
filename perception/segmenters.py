@@ -24,9 +24,7 @@ def labels_from_registry(registry: Mapping[str, Any] | None) -> list[str]:
     # Feed OWL-ViT the natural-language aliases (e.g. "coffee capsule") instead of
     # only the canonical names with underscores ("coffee_capsule"), which the
     # zero-shot detector handles poorly. canonicalize() maps every alias back.
-    labels = set(mapper.aliases.keys())
-    labels.update(mapper.canonical_names)
-    return sorted(labels)
+    return sorted(set(mapper.aliases) | mapper.canonical_names)
 
 
 class OwlVitSegmenter:
@@ -58,10 +56,7 @@ class OwlVitSegmenter:
             self.status_warning = f"segmenter_backend_unavailable:transformers:{exc}"
             return None
         try:
-            self._pipeline = pipeline(
-                task="zero-shot-object-detection",
-                model=self.model_path,
-            )
+            self._pipeline = pipeline(task="zero-shot-object-detection", model=self.model_path)
         except Exception as exc:
             self.status_warning = f"segmenter_backend_unavailable:{self.model_path}:{exc}"
             return None
@@ -145,13 +140,7 @@ class OwlVitSegmenter:
             score = float(output.get("score") or 0.0)
             if not label or score < self.score_threshold:
                 continue
-            detections.append(
-                Detection(
-                    label=label,
-                    mask=self._mask_for_detection(rgb, output),
-                    score=score,
-                )
-            )
+            detections.append(Detection(label=label, mask=self._mask_for_detection(rgb, output), score=score))
         self.status_warning = ""
         return detections
 

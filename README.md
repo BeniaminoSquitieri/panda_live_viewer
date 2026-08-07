@@ -3,9 +3,14 @@
 ## Quick Start
 
 ```bash
-cd ~/panda_live_viewer
+export LEROBOT_ROOT=/path/to/VLM-BT-BC
+export PANDA_VIEWER_ROOT=${LEROBOT_ROOT}/panda_live_viewer
+cd "${PANDA_VIEWER_ROOT}"
 ./run.sh
 ```
+
+Gli esempi successivi riusano `LEROBOT_ROOT` e `PANDA_VIEWER_ROOT`; impostali
+in ogni nuovo terminale oppure esportali nel profilo della shell.
 
 `run.sh` fa tutto in un solo comando:
 
@@ -26,7 +31,7 @@ cleanup esterni e rimane coerente con il resto degli artefatti del server.
 Per monitorare server, nodo e GPU:
 
 ```bash
-cd ~/panda_live_viewer
+cd ${PANDA_VIEWER_ROOT}
 ./status.sh
 ```
 
@@ -38,10 +43,11 @@ MODEL_PATH=~/models/Qwen3-VL-4B-Instruct MIN_FREE_MIB=9000 ./run.sh
 
 ### Controllare il caricamento del modello
 
-I pesi sono già salvati su disco in `MODEL_PATH`; quello che richiede tempo è
-caricarli nella RAM della GPU. Per evitare di ricaricarli a ogni avvio, lascia
-vivo il `vlm_live.model_server`: `Ctrl+C` su `./run.sh` ferma solo il nodo ROS,
-non il server del modello.
+`MODEL_PATH` può essere una directory locale oppure un model ID di Hugging Face;
+il default è `Qwen/Qwen3-VL-32B-Instruct`. Il primo avvio può quindi scaricare i
+pesi, oltre a caricarli nella RAM della GPU. Per evitare di ricaricarli a ogni
+avvio, lascia vivo `vlm_live.model_server`: `Ctrl+C` su `./run.sh` ferma solo il
+nodo ROS, non il server del modello.
 
 ```bash
 ./run.sh                 # default: avvia il model server se manca, altrimenti lo riusa
@@ -49,7 +55,7 @@ non il server del modello.
 ./run.sh --reload-model  # ferma il tuo model server e ricarica i pesi
 ./run.sh --no-load-model # non carica pesi; eventuali chiamate live VLM falliscono subito
 ./run.sh --external-model-url http://127.0.0.1:23333
-                         # usa un server OpenAI-compatible gia attivo, per esempio vLLM
+                         # usa un server OpenAI-compatible già attivo, per esempio vLLM
 ```
 
 Gli stessi modi sono disponibili via variabile d'ambiente:
@@ -68,7 +74,8 @@ side-by-side Front+Wrist image instead:
 VLM_CAMERA_VIEW=both ./run.sh
 ```
 
-> **Prerequisito**: `~/lerobot/install/setup.bash` deve esistere.
+> **Prerequisito**: `../install/setup.bash` deve esistere, oppure devi impostare
+> `LEROBOT_SETUP=/percorso/al/setup.bash`.
 > Vedi la sezione [lerobot ROS workspace](#lerobot-ros-workspace-interfaces-only) se non è ancora costruito.
 
 ---
@@ -117,32 +124,32 @@ source $CONDA_PREFIX/setup.bash
 
 `panda_live_viewer` itself is not a ROS package (no `package.xml`), so running
 `colcon build` here will report `0` packages and will not create
-`install/setup.bash`. The ROS workspace to build is `~/lerobot`.
+`install/setup.bash`. The ROS workspace to build is `${LEROBOT_ROOT}`.
 
 ## lerobot ROS workspace (interfaces only)
 
 The planner service requires `lerobot_bt_interfaces` to be built in a ROS
-workspace (commonly `~/lerobot`). A minimal workspace containing only this
+workspace (commonly `${LEROBOT_ROOT}`). A minimal workspace containing only this
 package is enough. Example:
 
 ```bash
-mkdir -p ~/lerobot/src
+mkdir -p ${LEROBOT_ROOT}/src
 
-git clone --depth 1 --branch runtime-bt-generation-mvp-c \
-  https://github.com/BeniaminoSquitieri/lerobot.git /tmp/lerobot_src
-cp -a /tmp/lerobot_src/src/lerobot_bt_interfaces ~/lerobot/src/
+git clone --depth 1 \
+  https://github.com/BeniaminoSquitieri/VLM-BT-BC.git /tmp/lerobot_src
+cp -a /tmp/lerobot_src/src/lerobot_bt_interfaces ${LEROBOT_ROOT}/src/
 rm -rf /tmp/lerobot_src
 
-cd ~/lerobot
+cd ${LEROBOT_ROOT}
 colcon build --symlink-install
 ```
 
 Dry-run planner service:
 
 ```bash
-cd ~/panda_live_viewer
+cd ${PANDA_VIEWER_ROOT}
 source /opt/ros/$ROS_DISTRO/setup.bash  # or: source $CONDA_PREFIX/setup.bash
-source ~/lerobot/install/setup.bash
+source ${LEROBOT_ROOT}/install/setup.bash
 
 python3 -m vlm_live.cli \
   --ros-args \
@@ -186,7 +193,7 @@ This allows dry-run planner service startup even when `qwen_vl_utils`,
 the `lerobot` ROS workspace before starting this node.
 
 Robot-day runbook: see the sibling checkout
-`~/lerobot/docs/VLM_BT_BC_COMANDI.md` (or
+`${LEROBOT_ROOT}/docs/VLM_BT_BC_COMANDI.md` (or
 `../lerobot/docs/VLM_BT_BC_COMANDI.md` when both repos share the same parent
 directory).
 
@@ -225,7 +232,7 @@ environment with:
 
 ```bash
 source /opt/ros/$ROS_DISTRO/setup.bash  # or: source $CONDA_PREFIX/setup.bash
-source ~/lerobot/install/setup.bash
+source ${LEROBOT_ROOT}/install/setup.bash
 ```
 
 Set `require_generate_plan_service:=false` only when intentionally running the
@@ -317,7 +324,7 @@ exists) and unsets `ROS_LOCALHOST_ONLY`.
 the line to `~/.bashrc`):
 
 ```bash
-source ~/panda_live_viewer/ros_env.sh
+source ${PANDA_VIEWER_ROOT}/ros_env.sh
 ```
 
 ## Testing: where each test runs (local robot vs GPU server)
@@ -341,7 +348,7 @@ imports and behaves the same in each environment). None need hardware.
 
 ```bash
 # panda_live_viewer — perception logic (12 tests)
-cd ~/panda_live_viewer
+cd ${PANDA_VIEWER_ROOT}
 python -m pytest tests/test_perception_pipeline.py tests/test_perception_geometry.py \
                  tests/test_perception_segmenters.py tests/test_scene_facts.py -q
 
@@ -351,7 +358,7 @@ python -m pytest tests/test_vlm_status_protocol.py tests/test_baseline_prompts.p
                  tests/test_verifier_experiment_log.py -q
 
 # lerobot — spatial-prior gate (30) + camera_static_tf_map publisher (5)
-cd ~/lerobot
+cd ${LEROBOT_ROOT}
 python -m pytest src/lerobot_bt_python/test_spatial_prior.py \
                  src/lerobot_bt_python/test_camera_publisher.py -q
 
@@ -369,7 +376,7 @@ The lerobot BT suite imports compiled packages, so it only runs after the ROS
 workspace is built (typically on the server, or wherever you build):
 
 ```bash
-cd ~/lerobot
+cd ${LEROBOT_ROOT}
 colcon build --packages-select lerobot_bt_interfaces lerobot_bt_python
 source install/setup.bash
 python -m pytest tests/lerobot_bt -q   # BT generation, safety, contracts
@@ -386,7 +393,7 @@ static TF, perception node, `scene_facts`, `query_pose`, metric sanity).
 Start the model server + node on the server and confirm the verifier responds:
 
 ```bash
-cd ~/panda_live_viewer
+cd ${PANDA_VIEWER_ROOT}
 ./run.sh            # starts Qwen3-VL model server (if down) + vlm_live node
 ./status.sh         # ALIVE + socket/log healthy
 ```
@@ -412,12 +419,12 @@ each step.
 
 ```bash
 # lerobot ROS workspace (rebuild after QueryObjectPose.srv changes)
-cd ~/lerobot
+cd ${LEROBOT_ROOT}
 colcon build --packages-select lerobot_bt_interfaces lerobot_bt_python
 source install/setup.bash
 
 # panda_live_viewer environment
-cd ~/panda_live_viewer
+cd ${PANDA_VIEWER_ROOT}
 source <your-conda-or-venv-activate>
 ```
 
@@ -466,7 +473,7 @@ node lifts poses into `base_link` using these transforms.
 ### 5. Start the perception node
 
 ```bash
-cd ~/panda_live_viewer
+cd ${PANDA_VIEWER_ROOT}
 python3 -m perception.cli \
   --ros-args \
   -p object_catalog_json:=perception/registries/coffee_registry.json \
@@ -551,8 +558,8 @@ See `bt_planning/` for helpers to build prompts and parse Linear IR JSON plans.
 
 - During BT execution, lerobot asks panda_live_viewer for condition verification only.
 - panda_live_viewer returns only statuses allowed by each request.
-- Current lerobot requests allow `SUCCESS`/`FAILURE`/`RUNNING`; they do not support `WAIT_HUMAN` end-to-end.
-- If the VLM proposes `WAIT_HUMAN` without request support, panda_live_viewer publishes `RUNNING` and prefixes the message with `WAIT_HUMAN: `.
+- Current lerobot requests allow `SUCCESS`, `FAILURE`, `RUNNING`, and `WAIT_HUMAN` end-to-end.
+- For older callers that omit `WAIT_HUMAN` from `allowed_statuses`, panda_live_viewer publishes `RUNNING` and prefixes the message with `WAIT_HUMAN: `.
 - Plan JSON is NOT a status result.
 - STATUS/REASON is NOT a plan.
 - Do NOT reuse `/lerobot_bt/vlm_result` for plans.

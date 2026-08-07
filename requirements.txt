@@ -1,4 +1,5 @@
 torch
+numpy
 transformers
 accelerate
 qwen-vl-utils

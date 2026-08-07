@@ -62,24 +62,26 @@ def camera_info_to_intrinsics(msg: Any) -> CameraIntrinsics:
 
 
 def decode_depth_image(msg: Any) -> np.ndarray:
-    """Decode a ROS Image-like depth message into a 2D numpy array."""
+    """Decode a ROS Image-like depth message, including row padding and endianness."""
     encoding = str(getattr(msg, "encoding", "")).upper()
-    width = int(msg.width)
-    height = int(msg.height)
-    data = msg.data
-
-    if encoding in {"16UC1", "MONO16"}:
-        dtype = np.uint16
-    elif encoding == "32FC1":
-        dtype = np.float32
-    else:
-        raise ValueError(f"Unsupported depth encoding {encoding!r}; expected 16UC1 or 32FC1.")
-
-    array = np.frombuffer(bytes(data), dtype=dtype)
-    expected = width * height
-    if array.size < expected:
-        raise ValueError(f"Depth image has {array.size} values; expected at least {expected}.")
-    return array[:expected].reshape((height, width))
+    try:
+        native_dtype = np.dtype({"16UC1": np.uint16, "MONO16": np.uint16, "32FC1": np.float32}[encoding])
+    except KeyError:
+        raise ValueError(f"Unsupported depth encoding {encoding!r}; expected 16UC1 or 32FC1.") from None
+    width, height = int(msg.width), int(msg.height)
+    row_bytes = width * native_dtype.itemsize
+    step = int(getattr(msg, "step", 0) or row_bytes)
+    if step < row_bytes:
+        raise ValueError(f"Depth image step is {step} bytes; expected at least {row_bytes}.")
+    raw = bytes(msg.data)
+    expected_bytes = step * height
+    if len(raw) < expected_bytes:
+        raise ValueError(f"Depth image has {len(raw)} bytes; expected at least {expected_bytes}.")
+    rows = np.frombuffer(raw[:expected_bytes], dtype=np.uint8).reshape((height, step))
+    packed = np.ascontiguousarray(rows[:, :row_bytes])
+    wire_dtype = native_dtype.newbyteorder(">" if getattr(msg, "is_bigendian", False) else "<")
+    decoded = np.frombuffer(packed, dtype=wire_dtype).reshape((height, width))
+    return decoded.astype(native_dtype, copy=False)
 
 
 def depth_to_meters(depth: np.ndarray, scale_m: float = 0.001) -> np.ndarray:

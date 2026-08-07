@@ -3,7 +3,6 @@
 import io
 import tempfile
 from pathlib import Path
-from typing import Optional, Tuple
 
 import numpy as np
 from PIL import Image as _PILImage
@@ -14,50 +13,40 @@ _PANEL_W, _PANEL_H = 640, 480
 
 
 def _resize(frame: np.ndarray, w: int = _PANEL_W, h: int = _PANEL_H) -> np.ndarray:
-    img = _PILImage.fromarray(frame)
-    img = img.resize((w, h), _PILImage.BILINEAR)
+    return np.array(_PILImage.fromarray(frame).resize((w, h), _PILImage.BILINEAR))
+
+
+def _annotate(img: _PILImage.Image, text: str, position: tuple[int, int], color: tuple[int, int, int]) -> np.ndarray:
+    from PIL import ImageDraw, ImageFont
+
+    try:
+        font = ImageFont.load_default(size=24)
+    except TypeError:
+        font = ImageFont.load_default()
+    ImageDraw.Draw(img).text(position, text, fill=color, font=font)
     return np.array(img)
 
 
-def decode_image(msg: CompressedImage) -> Optional[np.ndarray]:
+def decode_image(msg: CompressedImage) -> np.ndarray | None:
     """Decode a ROS compressed image message into an RGB numpy array."""
     try:
-        img = _PILImage.open(io.BytesIO(bytes(msg.data))).convert("RGB")
-        return np.array(img)
+        return np.array(_PILImage.open(io.BytesIO(bytes(msg.data))).convert("RGB"))
     except Exception:
         return None
 
 
-def placeholder(text: str, size: Tuple[int, int] = (_PANEL_W, _PANEL_H)) -> np.ndarray:
+def placeholder(text: str, size: tuple[int, int] = (_PANEL_W, _PANEL_H)) -> np.ndarray:
     """Create a black placeholder frame with a centered status label."""
-    from PIL import ImageDraw, ImageFont
-
     w, h = size
-    img = _PILImage.new("RGB", (w, h), (0, 0, 0))
-    draw = ImageDraw.Draw(img)
-    try:
-        font = ImageFont.load_default(size=24)
-    except TypeError:
-        font = ImageFont.load_default()
-    draw.text((40, h // 2), text, fill=(255, 255, 255), font=font)
-    return np.array(img)
+    return _annotate(_PILImage.new("RGB", (w, h), (0, 0, 0)), text, (40, h // 2), (255, 255, 255))
 
 
 def label(frame: np.ndarray, title: str) -> np.ndarray:
     """Return a copy of the frame with a visible title overlay."""
-    from PIL import ImageDraw, ImageFont
-
-    img = _PILImage.fromarray(frame).copy()
-    draw = ImageDraw.Draw(img)
-    try:
-        font = ImageFont.load_default(size=24)
-    except TypeError:
-        font = ImageFont.load_default()
-    draw.text((24, 12), title, fill=(0, 255, 255), font=font)
-    return np.array(img)
+    return _annotate(_PILImage.fromarray(frame).copy(), title, (24, 12), (0, 255, 255))
 
 
-def compose(front: Optional[np.ndarray], wrist: Optional[np.ndarray]) -> Optional[np.ndarray]:
+def compose(front: np.ndarray | None, wrist: np.ndarray | None) -> np.ndarray | None:
     """Build a side-by-side scene from the front and wrist cameras."""
     if front is None and wrist is None:
         return None
@@ -72,7 +61,7 @@ def compose(front: Optional[np.ndarray], wrist: Optional[np.ndarray]) -> Optiona
     return np.hstack([label(front, "Front camera"), label(wrist, "Wrist camera")])
 
 
-def compose_front(front: Optional[np.ndarray]) -> Optional[np.ndarray]:
+def compose_front(front: np.ndarray | None) -> np.ndarray | None:
     """Build a scene from the front camera only."""
     if front is None:
         return None
@@ -81,9 +70,8 @@ def compose_front(front: Optional[np.ndarray]) -> Optional[np.ndarray]:
 
 def save_image(scene: np.ndarray) -> str:
     """Persist a scene to a temporary PNG file and return the file path."""
-    img = _PILImage.fromarray(scene)
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-        img.save(tmp.name, format="PNG")
+        _PILImage.fromarray(scene).save(tmp.name, format="PNG")
         return tmp.name
 
 

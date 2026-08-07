@@ -12,7 +12,6 @@ import json
 import time
 from collections import OrderedDict
 from pathlib import Path
-from typing import Optional
 
 SCHEMA_VERSION = 1
 EVENT_TYPE_VERIFIER = "verifier"
@@ -29,32 +28,31 @@ def build_verifier_event(
     was_wait_human_coerced: bool,
     front_frame_available: bool,
     wrist_frame_available: bool,
-    duration_s: Optional[float] = None,
+    duration_s: float | None = None,
     model_path: str = "",
     dry_run_planner: bool = False,
-    error_message: Optional[str] = None,
-    timestamp_unix_s: Optional[float] = None,
-) -> "OrderedDict[str, object]":
+    error_message: str | None = None,
+    timestamp_unix_s: float | None = None,
+) -> OrderedDict[str, object]:
     """Build a verifier event dict with a stable field order."""
-
-    event: "OrderedDict[str, object]" = OrderedDict()
-    event["schema_version"] = SCHEMA_VERSION
-    event["event_type"] = EVENT_TYPE_VERIFIER
-    event["timestamp_unix_s"] = time.time() if timestamp_unix_s is None else timestamp_unix_s
-    event["skill_name"] = skill_name
-    event["attempt_id"] = attempt_id
-    event["allowed_statuses"] = list(allowed_statuses) if allowed_statuses else []
-    event["raw_status"] = raw_status
-    event["published_status"] = published_status
-    event["reason"] = reason
-    event["was_wait_human_coerced"] = bool(was_wait_human_coerced)
-    event["front_frame_available"] = bool(front_frame_available)
-    event["wrist_frame_available"] = bool(wrist_frame_available)
-    event["duration_s"] = duration_s
-    event["model_path"] = model_path
-    event["dry_run_planner"] = bool(dry_run_planner)
-    event["error_message"] = error_message
-    return event
+    return OrderedDict(
+        schema_version=SCHEMA_VERSION,
+        event_type=EVENT_TYPE_VERIFIER,
+        timestamp_unix_s=time.time() if timestamp_unix_s is None else timestamp_unix_s,
+        skill_name=skill_name,
+        attempt_id=attempt_id,
+        allowed_statuses=list(allowed_statuses) if allowed_statuses else [],
+        raw_status=raw_status,
+        published_status=published_status,
+        reason=reason,
+        was_wait_human_coerced=bool(was_wait_human_coerced),
+        front_frame_available=bool(front_frame_available),
+        wrist_frame_available=bool(wrist_frame_available),
+        duration_s=duration_s,
+        model_path=model_path,
+        dry_run_planner=bool(dry_run_planner),
+        error_message=error_message,
+    )
 
 
 def append_verifier_event(path, event) -> None:

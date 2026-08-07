@@ -6,11 +6,12 @@
 set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LEROBOT_SETUP="/home/bsquitieri-iit.local/lerobot/install/setup.bash"
+LEROBOT_ROOT="${LEROBOT_ROOT:-$(dirname "$SCRIPT_DIR")}"
+LEROBOT_SETUP="${LEROBOT_SETUP:-$LEROBOT_ROOT/install/setup.bash}"
 
 # Model is overridable so we can test the pipeline with a smaller model:
 #   MODEL_PATH=/path/to/small-model ./run.sh
-MODEL_PATH="${MODEL_PATH:-/home/bsquitieri-iit.local/models/Qwen3-VL-32B-Instruct}"
+MODEL_PATH="${MODEL_PATH:-${VLM_MODEL_PATH:-Qwen/Qwen3-VL-32B-Instruct}}"
 
 # Runtime state (pid/log/socket) is kept in a stable, inspectable dir inside
 # the project instead of only /tmp.
@@ -20,11 +21,13 @@ SOCKET_PATH="${SOCKET_PATH:-$RUNTIME_DIR/vlm_server.sock}"
 PID_FILE="$RUNTIME_DIR/vlm_server.pid"
 SERVER_LOG="$RUNTIME_DIR/vlm_server.log"
 META_FILE="$RUNTIME_DIR/vlm_server.json"
-VERIFIER_LOG="/home/bsquitieri/lerobot/generated_bt/experiments/verifier_events.jsonl"
+VERIFIER_LOG="${VERIFIER_LOG:-$LEROBOT_ROOT/generated_bt/experiments/verifier_events.jsonl}"
 MODEL_SERVER_MODE="${MODEL_SERVER_MODE:-auto}"
 EXTERNAL_MODEL_URL="${EXTERNAL_MODEL_URL:-${MODEL_SERVER_URL:-}}"
 VLM_CAMERA_VIEW="${VLM_CAMERA_VIEW:-front}"
 ROS_ARGS=()
+NODE_ARGS=(-p lazy_load_model:=true -p vlm_camera_view:="$VLM_CAMERA_VIEW" -p planner_dry_run:=false -p require_generate_plan_service:=true -p verifier_experiment_log_path:="$VERIFIER_LOG")
+run_node() { exec python3 -u -m vlm_live.cli --ros-args "$@" "${NODE_ARGS[@]}" "${ROS_ARGS[@]}"; }
 
 usage() {
     cat <<EOF
@@ -101,6 +104,11 @@ case "$MODEL_SERVER_MODE" in
         ;;
 esac
 
+if [ ! -f "$LEROBOT_SETUP" ]; then
+    echo "[run.sh] ERROR: ROS workspace setup not found: $LEROBOT_SETUP"
+    echo "[run.sh] Set LEROBOT_SETUP or build the workspace with colcon."
+    exit 1
+fi
 # shellcheck disable=SC1090
 source "$LEROBOT_SETUP"
 
@@ -119,17 +127,26 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 MIN_FREE_MIB="${MIN_FREE_MIB:-34000}"
 
 # GPUs to never use (e.g. reserved/unstable). Space-separated indices.
-EXCLUDED_GPUS="1"
+EXCLUDED_GPUS="${EXCLUDED_GPUS:-}"
 
 if [ "$MODEL_SERVER_MODE" != "off" ] && [ "$MODEL_SERVER_MODE" != "external" ]; then
+    if ! command -v nvidia-smi >/dev/null 2>&1; then
+        echo "[run.sh] ERROR: nvidia-smi is required for the local model server."
+        echo "[run.sh] Use --external-model-url or --no-load-model on a non-GPU host."
+        exit 1
+    fi
     # Pick the GPU with the most free memory at startup time, skipping excluded ones.
     _grep_excl=$(echo "$EXCLUDED_GPUS" | tr ' ' '|')
     read -r BEST_GPU BEST_FREE < <(nvidia-smi --query-gpu=index,memory.free \
         --format=csv,noheader,nounits \
         | grep -vE "^[[:space:]]*($_grep_excl)[[:space:]]*," \
         | sort -t',' -k2 -rn | head -1 | tr ',' ' ')
+    if [ -z "${BEST_GPU:-}" ] || [ -z "${BEST_FREE:-}" ]; then
+        echo "[run.sh] ERROR: no usable NVIDIA GPU found (excluded: ${EXCLUDED_GPUS:-none})."
+        exit 1
+    fi
     export CUDA_VISIBLE_DEVICES="$BEST_GPU"
-    echo "[run.sh] Using GPU $BEST_GPU (${BEST_FREE} MiB free, excluding GPU(s): $EXCLUDED_GPUS)."
+    echo "[run.sh] Using GPU $BEST_GPU (${BEST_FREE} MiB free; excluded: ${EXCLUDED_GPUS:-none})."
     if [ "${BEST_FREE:-0}" -lt "$MIN_FREE_MIB" ]; then
         echo "[run.sh] WARNING: no GPU has >= ${MIN_FREE_MIB} MiB free."
         echo "[run.sh] WARNING: the model will offload to CPU and inference will be"
@@ -141,15 +158,7 @@ cd "$SCRIPT_DIR"
 
 if [ "$MODEL_SERVER_MODE" = "off" ]; then
     echo "[run.sh] Model server disabled (--no-load-model). Starting ROS node without local model_server_url..."
-    exec python3 -u -m vlm_live.cli \
-        --ros-args \
-        -p lazy_load_model:=true \
-        -p disable_model_load:=true \
-        -p vlm_camera_view:="$VLM_CAMERA_VIEW" \
-        -p planner_dry_run:=false \
-        -p require_generate_plan_service:=true \
-        -p verifier_experiment_log_path:="$VERIFIER_LOG" \
-        "${ROS_ARGS[@]}"
+    run_node -p disable_model_load:=true
 fi
 
 if [ "$MODEL_SERVER_MODE" = "external" ]; then
@@ -158,15 +167,7 @@ if [ "$MODEL_SERVER_MODE" = "external" ]; then
         exit 2
     fi
     echo "[run.sh] Using external model server: $EXTERNAL_MODEL_URL"
-    exec python3 -u -m vlm_live.cli \
-        --ros-args \
-        -p model_server_url:="$EXTERNAL_MODEL_URL" \
-        -p lazy_load_model:=true \
-        -p vlm_camera_view:="$VLM_CAMERA_VIEW" \
-        -p planner_dry_run:=false \
-        -p require_generate_plan_service:=true \
-        -p verifier_experiment_log_path:="$VERIFIER_LOG" \
-        "${ROS_ARGS[@]}"
+    run_node -p model_server_url:="$EXTERNAL_MODEL_URL"
 fi
 
 if [ "$MODEL_SERVER_MODE" = "reload" ]; then
@@ -262,12 +263,4 @@ fi
 
 # Start ROS node (foreground, Ctrl+C to stop — does NOT kill the model server)
 echo "[run.sh] Starting ROS node..."
-exec python3 -u -m vlm_live.cli \
-    --ros-args \
-    -p model_server_url:="$SOCKET_PATH" \
-    -p lazy_load_model:=true \
-    -p vlm_camera_view:="$VLM_CAMERA_VIEW" \
-    -p planner_dry_run:=false \
-    -p require_generate_plan_service:=true \
-    -p verifier_experiment_log_path:="$VERIFIER_LOG" \
-    "${ROS_ARGS[@]}"
+run_node -p model_server_url:="$SOCKET_PATH"

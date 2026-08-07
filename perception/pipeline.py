@@ -33,7 +33,6 @@ class NoopSegmenter:
     """Fail-closed segmenter used until a real model is configured."""
 
     def detect(self, rgb: np.ndarray) -> Iterable[Detection]:
-        _ = rgb
         return []
 
 
@@ -73,8 +72,6 @@ class RegistryMapper:
                 for alias, canonical in raw_aliases.items():
                     aliases[str(alias).lower()] = str(canonical)
 
-        for name in canonical_names:
-            aliases[name.lower()] = name
         return cls(canonical_names=canonical_names, aliases=aliases)
 
     def canonicalize(self, label: str) -> str | None:
@@ -103,9 +100,7 @@ class _Candidate:
 
 
 def _distance(a: tuple[float, float, float], b: tuple[float, float, float]) -> float:
-    return float(
-        np.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2)
-    )
+    return float(np.sqrt(sum((left - right) ** 2 for left, right in zip(a, b, strict=True))))
 
 
 class PerceptionPipeline:
@@ -130,9 +125,7 @@ class PerceptionPipeline:
         # Map of object -> support object (e.g. coffee_capsule -> plate). When the
         # support object is detected, the instance of the target object nearest to
         # the support centroid is preferred over the most-confident one.
-        self.support_preferences = {
-            str(key): str(value) for key, value in (support_preferences or {}).items()
-        }
+        self.support_preferences = {str(key): str(value) for key, value in (support_preferences or {}).items()}
         self.support_radius_m = float(support_radius_m)
 
     def run(
@@ -166,12 +159,8 @@ class PerceptionPipeline:
             seen_by_name[canonical_name] = seen_by_name.get(canonical_name, 0) + 1
             object_warnings: list[str] = []
 
-            translation = None
-            quaternion = None
-            covariance = None
+            translation = quaternion = covariance = pose_residual_m = inlier_ratio = None
             confidence = 0.0
-            pose_residual_m = None
-            inlier_ratio = None
 
             if depth is None or intrinsics is None:
                 object_warnings.append("insufficient_depth_or_camera_info")
@@ -206,11 +195,7 @@ class PerceptionPipeline:
                     object_warnings.append("orientation_estimated_pca")
 
             has_pose = translation is not None and quaternion is not None
-            centroid = (
-                (float(translation["x"]), float(translation["y"]), float(translation["z"]))
-                if has_pose
-                else None
-            )
+            centroid = tuple(float(translation[key]) for key in "xyz") if has_pose else None
             fact = build_object_pose_fact(
                 name=canonical_name,
                 present=True,
@@ -225,19 +210,13 @@ class PerceptionPipeline:
                 inlier_ratio=inlier_ratio,
                 warnings=object_warnings,
             )
-            fact["observation_status"] = (
-                ObservationStatus.DETECTED_WITH_POSE
-                if has_pose
-                else ObservationStatus.DETECTED_NO_POSE
-            )
+            fact["observation_status"] = ObservationStatus.DETECTED_WITH_POSE if has_pose else ObservationStatus.DETECTED_NO_POSE
             fact["geometry_quality"] = confidence
             enrich_fact_contract(fact)
             quality = (1 if has_pose else 0, confidence, float(detection.score))
-            candidates.setdefault(canonical_name, []).append(
-                _Candidate(fact=fact, centroid=centroid, quality=quality)
-            )
+            candidates.setdefault(canonical_name, []).append(_Candidate(fact=fact, centroid=centroid, quality=quality))
 
-        facts = self._resolve_candidates(candidates, warnings)
+        facts = self._resolve_candidates(candidates)
 
         # Missing detections are explicit observations, not proof of absence.
         # This distinction lets semantic consumers render UNKNOWN/NOT_DETECTED
@@ -273,13 +252,10 @@ class PerceptionPipeline:
     def _resolve_candidates(
         self,
         candidates: dict[str, list[_Candidate]],
-        warnings: list[str],
     ) -> dict[str, Any]:
         """Select one fact per object, applying spatial support preferences."""
         # Preliminary pick: most-confident candidate (valid pose first).
-        chosen: dict[str, _Candidate] = {}
-        for name, items in candidates.items():
-            chosen[name] = max(items, key=lambda candidate: candidate.quality)
+        chosen = {name: max(items, key=lambda candidate: candidate.quality) for name, items in candidates.items()}
 
         support_centroids = {
             name: candidate.centroid
@@ -300,11 +276,7 @@ class PerceptionPipeline:
             located = [c for c in items if c.centroid is not None]
             if not located:
                 continue
-            scored = sorted(
-                located,
-                key=lambda c: _distance(c.centroid, support_centroid),
-            )
-            nearest = scored[0]
+            nearest = min(located, key=lambda candidate: _distance(candidate.centroid, support_centroid))
             nearest_distance = _distance(nearest.centroid, support_centroid)
             if self.support_radius_m > 0.0 and nearest_distance > self.support_radius_m:
                 chosen[name].fact.setdefault("warnings", []).append(

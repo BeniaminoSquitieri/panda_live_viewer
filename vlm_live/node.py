@@ -5,7 +5,7 @@ import threading
 import time
 import traceback
 from dataclasses import dataclass
-from typing import Callable, Optional, Tuple
+from typing import Callable
 
 import numpy as np
 import rclpy
@@ -93,31 +93,7 @@ class VlmNode(Node):
 
         self._declare_parameters()
         cfg = self._load_config()
-
-        self.model_path = cfg.model_path
-        self.front_topic = cfg.front_topic
-        self.wrist_topic = cfg.wrist_topic
-        self.req_topic = cfg.req_topic
-        self.res_topic = cfg.res_topic
-        self.plan_service = cfg.plan_service
-        self.ground_service = cfg.ground_service
-        self.check_s = cfg.check_s
-        self.reasoning = cfg.reasoning
-        self.log_out = cfg.log_out
-        self.show_view = cfg.show_view
-        self.view_host = cfg.view_host
-        self.view_port = cfg.view_port
-        self.view_fps = cfg.view_fps
-        self.max_tokens = cfg.max_tokens
-        self.planner_dry_run = cfg.planner_dry_run
-        self.planner_max_tokens = cfg.planner_max_tokens
-        self.lazy_load_model = cfg.lazy_load_model
-        self.require_generate_plan_service = cfg.require_generate_plan_service
-        self.scene_facts_topic = cfg.scene_facts_topic
-        self.verifier_experiment_log_path = cfg.verifier_experiment_log_path
-        self.model_server_url = cfg.model_server_url
-        self.disable_model_load = cfg.disable_model_load
-        self.vlm_camera_view = cfg.vlm_camera_view
+        self.__dict__.update(vars(cfg))
 
         self._init_state()
         self._init_ros_interfaces()
@@ -218,10 +194,7 @@ class VlmNode(Node):
         self.frames = {"front": None, "wrist": None}
         self.req = None
         self.req_id = 0
-        self.processor = None
-        self.model = None
-        self.device = None
-        self._model_backend_cache = None
+        self.processor = self.model = self.device = self._model_backend_cache = None
         self.latest_scene_facts_json = ""
 
     def _init_ros_interfaces(self) -> None:
@@ -290,9 +263,7 @@ class VlmNode(Node):
             )
 
     def _plan_service_status(self) -> str:
-        if self.generate_plan_srv is None:
-            return "GenerateTaskPlan service disabled"
-        return self.plan_service
+        return "GenerateTaskPlan service disabled" if self.generate_plan_srv is None else self.plan_service
 
     def _import_model_backend(
         self,
@@ -322,20 +293,10 @@ class VlmNode(Node):
             self._model_backend_cache = self._import_model_backend()
         return self._model_backend_cache
 
-    def _load_model_fn(self) -> Callable[..., tuple]:
-        return self._model_backend()[0]
-
-    def _run_inference_fn(self) -> Callable[..., tuple[str, str]]:
-        return self._model_backend()[1]
-
-    def _run_text_inference_fn(self) -> Callable[..., str]:
-        return self._model_backend()[2]
-
     def _load_vlm(self) -> None:
         """Load processor and model weights."""
         self.get_logger().info(f"Loading VLM from {self.model_path}")
-        load_model_fn = self._load_model_fn()
-        self.processor, self.model, self.device = load_model_fn(self.model_path)
+        self.processor, self.model, self.device = self._model_backend()[0](self.model_path)
 
     def _vlm_loaded(self) -> bool:
         return self.processor is not None and self.model is not None and self.device is not None
@@ -417,22 +378,13 @@ class VlmNode(Node):
         self._publish_result(request, STATUS_RUNNING, "VLM processing")
         self.wake.set()
 
-    def _get_frames(self) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+    def _get_frames(self) -> tuple[np.ndarray | None, np.ndarray | None]:
         with self.lock:
-            front = self.frames["front"]
-            wrist = self.frames["wrist"]
-            front_copy = None if front is None else front.copy()
-            wrist_copy = None if wrist is None else wrist.copy()
-        return front_copy, wrist_copy
+            return tuple(None if self.frames[name] is None else self.frames[name].copy() for name in ("front", "wrist"))
 
-    def _get_active_request(self) -> Tuple[Optional[dict], int]:
+    def _get_active_request(self) -> tuple[dict | None, int]:
         with self.lock:
-            if self.req is None:
-                return None, 0
-            return dict(self.req), self.req_id
-
-    def _set_result(self, request: dict, status: str, reason: str) -> None:
-        self._publish_result(request, status, reason)
+            return (None, 0) if self.req is None else (dict(self.req), self.req_id)
 
     def _log_verifier_event(
         self,
@@ -443,7 +395,7 @@ class VlmNode(Node):
         reason: str,
         was_wait_human_coerced: bool,
         duration_s: float,
-        error_message: Optional[str],
+        error_message: str | None,
     ) -> None:
         """Append one verifier event for offline analysis (provenance only).
 
@@ -494,13 +446,11 @@ class VlmNode(Node):
             logger=self.get_logger(),
         )
 
-    def _compose_scene(self) -> Optional[np.ndarray]:
+    def _compose_scene(self) -> np.ndarray | None:
         front, wrist = self._get_frames()
-        if self.vlm_camera_view != "both":
-            return compose_front(front)
-        return compose(front, wrist)
+        return compose(front, wrist) if self.vlm_camera_view == "both" else compose_front(front)
 
-    def _wait_for_scene(self, timeout_s: float = 10.0) -> Optional[np.ndarray]:
+    def _wait_for_scene(self, timeout_s: float = 10.0) -> np.ndarray | None:
         """Poll for a composed scene until both camera frames are available.
 
         Cameras publish continuously, but a plan request can arrive within
@@ -533,27 +483,18 @@ class VlmNode(Node):
 
             return run_inference_via_server(
                 server_url=self.model_server_url,
-                scene=scene,
-                prompt=prompt,
-                tokens=self.max_tokens,
                 reasoning=self.reasoning,
-                log_out=self.log_out,
-                logger=self.get_logger(),
+                **self._call_kwargs(scene, prompt, self.max_tokens),
             )
 
         with self.inference_lock:
             self._ensure_vlm_loaded()
-            run_inference_fn = self._run_inference_fn()
-            return run_inference_fn(
-                scene=scene,
-                prompt=prompt,
+            return self._model_backend()[1](
                 processor=self.processor,
                 model=self.model,
                 device=self.device,
-                tokens=self.max_tokens,
                 reasoning=self.reasoning,
-                log_out=self.log_out,
-                logger=self.get_logger(),
+                **self._call_kwargs(scene, prompt, self.max_tokens),
             )
 
     def _run_planner_vlm(self, prompt: str) -> str:
@@ -566,26 +507,20 @@ class VlmNode(Node):
 
             return run_text_inference_via_server(
                 server_url=self.model_server_url,
-                scene=scene,
-                prompt=prompt,
-                tokens=self.planner_max_tokens,
-                log_out=self.log_out,
-                logger=self.get_logger(),
+                **self._call_kwargs(scene, prompt, self.planner_max_tokens),
             )
 
         with self.inference_lock:
             self._ensure_vlm_loaded()
-            run_text_inference_fn = self._run_text_inference_fn()
-            return run_text_inference_fn(
-                scene=scene,
-                prompt=prompt,
+            return self._model_backend()[2](
                 processor=self.processor,
                 model=self.model,
                 device=self.device,
-                tokens=self.planner_max_tokens,
-                log_out=self.log_out,
-                logger=self.get_logger(),
+                **self._call_kwargs(scene, prompt, self.planner_max_tokens),
             )
+
+    def _call_kwargs(self, scene: np.ndarray, prompt: str, tokens: int) -> dict:
+        return {"scene": scene, "prompt": prompt, "tokens": tokens, "log_out": self.log_out, "logger": self.get_logger()}
 
     def _downgrade_uncertain_failure(self, status: str, reason: str) -> tuple[str, str]:
         """Treat visibility/uncertainty failures as non-terminal RUNNING.
@@ -678,7 +613,7 @@ class VlmNode(Node):
             was_wait_human_coerced = raw_status == STATUS_WAIT_HUMAN and status == STATUS_RUNNING
             if not was_wait_human_coerced:
                 status = fit_status(status, request.get("allowed_statuses", DEFAULT_ALLOWED_STATUSES))
-            self._set_result(request, status, reason)
+            self._publish_result(request, status, reason)
             self._log_verifier_event(
                 request=request,
                 raw_status=raw_status,

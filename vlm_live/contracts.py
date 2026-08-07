@@ -23,12 +23,9 @@ class ControlAction(StrEnum):
 
 def semantic_contract_for_status(status: str) -> tuple[SemanticStatus, ControlAction]:
     """Map the model vocabulary to task semantics and explicit control intent."""
-    if status == STATUS_SUCCESS:
-        return SemanticStatus.SATISFIED, ControlAction.STOP_SUCCESS
-    if status == STATUS_FAILURE:
-        return SemanticStatus.ANOMALY, ControlAction.STOP_UNSAFE
-    if status == STATUS_WAIT_HUMAN:
-        return SemanticStatus.UNKNOWN, ControlAction.REQUEST_HUMAN
-    if status == STATUS_RUNNING:
-        return SemanticStatus.NOT_SATISFIED, ControlAction.KEEP_RUNNING
-    return SemanticStatus.UNKNOWN, ControlAction.KEEP_RUNNING
+    return {
+        STATUS_SUCCESS: (SemanticStatus.SATISFIED, ControlAction.STOP_SUCCESS),
+        STATUS_FAILURE: (SemanticStatus.ANOMALY, ControlAction.STOP_UNSAFE),
+        STATUS_WAIT_HUMAN: (SemanticStatus.UNKNOWN, ControlAction.REQUEST_HUMAN),
+        STATUS_RUNNING: (SemanticStatus.NOT_SATISFIED, ControlAction.KEEP_RUNNING),
+    }.get(status, (SemanticStatus.UNKNOWN, ControlAction.KEEP_RUNNING))

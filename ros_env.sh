@@ -6,7 +6,7 @@
 # time you open a terminal:
 #
 #     source "$(dirname "${BASH_SOURCE[0]}")/ros_env.sh"   # from a script
-#     source ~/panda_live_viewer/ros_env.sh                # interactively
+#     source ${PANDA_VIEWER_ROOT}/ros_env.sh                # interactively
 #
 # It honours any value already set in the environment and only fills in the
 # project defaults when a variable is missing, so it never clobbers a custom

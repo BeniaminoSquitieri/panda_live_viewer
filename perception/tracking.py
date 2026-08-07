@@ -79,13 +79,7 @@ class TemporalObjectTracker:
                 or track.frame_id != frame_id
                 or float(np.linalg.norm(position - track.position)) > self.association_distance_m
             ):
-                track = _Track(
-                    track_id=self._next_track_id,
-                    frame_id=frame_id,
-                    position=position,
-                    last_stamp=stamp,
-                    confirmations=1,
-                )
+                track = _Track(self._next_track_id, frame_id, position, stamp, 1)
                 self._next_track_id += 1
                 self._tracks[name] = track
             else:
@@ -94,18 +88,10 @@ class TemporalObjectTracker:
                 track.confirmations += 1
 
             fact["pose"] = dict(fact["pose"])
-            fact["pose"]["translation"] = {
-                "x": float(track.position[0]),
-                "y": float(track.position[1]),
-                "z": float(track.position[2]),
-            }
+            fact["pose"]["translation"] = dict(zip(("x", "y", "z"), map(float, track.position), strict=True))
             fact["track_id"] = track.track_id
             fact["confirmation_count"] = track.confirmations
-            fact["observation_status"] = (
-                ObservationStatus.DETECTED_WITH_POSE
-                if track.confirmations >= self.min_confirmations
-                else ObservationStatus.TENTATIVE
-            )
+            fact["observation_status"] = ObservationStatus.DETECTED_WITH_POSE if track.confirmations >= self.min_confirmations else ObservationStatus.TENTATIVE
             if track.confirmations < self.min_confirmations:
                 fact.setdefault("warnings", []).append("track_tentative")
             output[name] = enrich_fact_contract(fact)

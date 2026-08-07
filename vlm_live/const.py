@@ -1,10 +1,12 @@
 """Shared defaults and protocol constants for the Panda VLM live verifier."""
 
+import os
+
 # Local 32B checkpoint used by default for the highest scene-understanding
 # quality on safety-critical semantic gates. Smaller Hub models are still
 # available via the ROS parameter `model_path` when faster but less reliable
 # checks are acceptable.
-MODEL_PATH = "/home/bsquitieri-iit.local/models/Qwen3-VL-32B-Instruct"
+MODEL_PATH = os.environ.get("VLM_MODEL_PATH", "Qwen/Qwen3-VL-32B-Instruct")
 
 # ROS CONTRACT with the separate VLM-BT-BC repo. These topic/service names and
 # the STATUS_* vocabulary below are a wire contract: VLM-BT-BC consumes them by

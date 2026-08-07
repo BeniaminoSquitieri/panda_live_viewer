@@ -2,7 +2,6 @@
 
 import gc
 import os
-from typing import Tuple
 
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
@@ -11,7 +10,7 @@ from qwen_vl_utils import process_vision_info
 from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
 
 from .camera import cleanup, save_image
-from .prompt import extract_reason, parse_status
+from .prompt import log_response, parse_verdict
 
 
 def load_model(model_path: str):
@@ -27,8 +26,7 @@ def load_model(model_path: str):
 
 
 def _is_cuda_oom(exc: BaseException) -> bool:
-    text = str(exc).lower()
-    return "cuda out of memory" in text or "out of memory" in text
+    return "out of memory" in str(exc).lower()
 
 
 def _cleanup_cuda_memory() -> None:
@@ -69,11 +67,8 @@ def run_text_inference(scene, prompt: str, processor, model, device, tokens: int
         inputs = inputs.to(device)
 
         generated_ids = None
-        generated_ids_trimmed = None
-        output_text = ""
         retry_tokens = min(tokens, 256)
         token_attempts = [tokens] if retry_tokens == tokens else [tokens, retry_tokens]
-        last_exc = None
         for attempt_index, attempt_tokens in enumerate(token_attempts, start=1):
             try:
                 with torch.inference_mode():
@@ -86,7 +81,6 @@ def run_text_inference(scene, prompt: str, processor, model, device, tokens: int
             except RuntimeError as exc:
                 if not _is_cuda_oom(exc):
                     raise
-                last_exc = exc
                 if attempt_index >= len(token_attempts):
                     raise
                 logger.warning(
@@ -103,9 +97,6 @@ def run_text_inference(scene, prompt: str, processor, model, device, tokens: int
                     return_tensors="pt",
                 )
                 inputs = inputs.to(device)
-        if generated_ids is None and last_exc is not None:
-            raise last_exc
-
         generated_ids_trimmed = [
             out_ids[len(in_ids):]
             for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
@@ -117,12 +108,7 @@ def run_text_inference(scene, prompt: str, processor, model, device, tokens: int
         )[0].strip()
 
         if log_out:
-            status = parse_status(output_text)
-            reason = extract_reason(output_text)
-            if reason:
-                logger.info(f"VLM response: STATUS={status} REASON={reason}")
-            else:
-                logger.info(f"VLM response: STATUS={status}")
+            log_response(output_text, logger)
 
         return output_text
     finally:
@@ -133,12 +119,9 @@ def run_text_inference(scene, prompt: str, processor, model, device, tokens: int
         cleanup(scene_path)
 
 
-def run_inference(scene, prompt: str, processor, model, device, tokens: int, reasoning: bool, log_out: bool, logger) -> Tuple[str, str]:
+def run_inference(scene, prompt: str, processor, model, device, tokens: int, reasoning: bool, log_out: bool, logger) -> tuple[str, str]:
     """Run the multimodal model on the current scene and return a verdict."""
-    generation_limit = tokens
-    if not reasoning:
-        generation_limit = min(generation_limit, 4)
-
+    generation_limit = tokens if reasoning else min(tokens, 4)
     output_text = run_text_inference(
         scene=scene,
         prompt=prompt,
@@ -150,8 +133,4 @@ def run_inference(scene, prompt: str, processor, model, device, tokens: int, rea
         logger=logger,
     )
 
-    status = parse_status(output_text)
-    reason = extract_reason(output_text)
-    if not output_text:
-        reason = "Empty model output."
-    return status, reason
+    return parse_verdict(output_text)
